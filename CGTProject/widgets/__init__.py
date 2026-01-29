@@ -1,8 +1,11 @@
 from .fileManagerWidget import FileManagerWidget
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QFileDialog
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtGui import QIcon
+from .advancedTabWidget import AdvancedTabWidget
+from .customPlotToolbar import CustomPlotToolbar
+from .plottedGraphWidget import PlottedGraphWidget
 
 __all__ = [
     "FileManagerWidget",
+    "AdvancedTabWidget",
+    "CustomPlotToolbar",
+    "PlottedGraphWidget"
     ]

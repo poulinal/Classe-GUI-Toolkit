@@ -118,6 +118,12 @@ class MainAnalysisPage(QWidget):
         if self.classeDataModel:
             quad_mesh_data = self.classeDataModel.getQuadMeshAtCurrentIndex()
             if quad_mesh_data:
+                self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data)
+                
+    def initialPlot(self):
+        if self.classeDataModel:
+            quad_mesh_data = self.classeDataModel.getQuadMeshAtCurrentIndex()
+            if quad_mesh_data:
                 self.plotted_graph_widget.plotQuadMeshData(quad_mesh_data)
         
         

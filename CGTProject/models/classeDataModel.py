@@ -58,3 +58,17 @@ class ClasseDataModel:
         else:
             print("No data available or temperature not found.")
         return None
+    
+    def getDataOffCoords(self, distance, coords):
+        # Placeholder for extracting data off specified coordinates
+        print(f"Getting data off coordinates for distance: {distance} and coords: {coords}")
+        if self.data and self.temperature in self.data:
+            data_array = self.data[self.temperature].nxsignal
+            # Implement logic to extract data based on distance and coords
+            # # This is a placeholder implementation
+            # extracted_data = data_array[coords[1], coords[0], :]
+            extracted_data = map_coordinates(data_array, coords, order=1)
+            return extracted_data
+        else:
+            print("No data available or temperature not found.")
+        return None

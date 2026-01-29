@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Data Application")
-        self.setGeometry(100, 100, 600, 400)
+        self.setGeometry(100, 100, 600, 800)
         
         # Create stacked widget for page navigation
         self.stacked_widget = QStackedWidget()
