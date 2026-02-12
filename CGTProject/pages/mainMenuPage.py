@@ -1,10 +1,13 @@
 # AP 2026
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
-                             QPushButton, QStackedWidget, QLabel)
-from PyQt5.QtCore import Qt, QSettings
+                             QPushButton, QStackedWidget, QLabel, QShortcut)
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal
+from PyQt5.QtGui import QKeySequence
 from CGTProject.pages.mainAnalysisPage import MainAnalysisPage
 from CGTProject.pages.processDataPage import ProcessDataPage
+from CGTProject.pages.lineCutPage import LineCutPage
+from CGTProject.widgets.advancedTabWidget import AdvancedTabWidget
 
 
 class MainMenu(QWidget):
@@ -12,6 +15,8 @@ class MainMenu(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout()
+        
+        self.tab_counter = 0
         
         # Title
         title = QLabel("Main Menu")
@@ -57,14 +62,57 @@ class MainWindow(QMainWindow):
         self.main_menu = MainMenu()
         self.process_page = ProcessDataPage(settings)
         self.analyze_page = MainAnalysisPage(settings)
+        self.analyze_page.openExtractedData.connect(lambda extractedData: self.open_line_cut(extractedData))
+        
+        # Create tab widget
+        self.analysis_tab_widget = AdvancedTabWidget()
+        # layout.addWidget(self.analysis_tab_widget)
+        self.analysis_tab_widget.addTab(self.analyze_page, "Main Analysis Page")
+        self.tab_counter = 1
+        
         
         # Add pages to stack
         self.stacked_widget.addWidget(self.main_menu)      # index 0
         self.stacked_widget.addWidget(self.process_page)   # index 1
-        self.stacked_widget.addWidget(self.analyze_page)   # index 2
+        self.stacked_widget.addWidget(self.analysis_tab_widget)   # index 2
         
         # Connect navigation signals
         self.main_menu.process_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(1))
         self.main_menu.analyze_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(2))
         self.process_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
         self.analyze_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
+        
+        
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts for tab management"""
+        
+        # Ctrl+T to add new tab
+        # new_tab_shortcut = QShortcut(QKeySequence("Ctrl+T"), self)
+        # new_tab_shortcut.activated.connect(self.add_new_tab)
+        
+        # Ctrl+W to close current tab
+        close_tab_shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
+        close_tab_shortcut.activated.connect(self.close_current_tab)
+        
+        # Ctrl+Shift+T to duplicate current tab
+        duplicate_shortcut = QShortcut(QKeySequence("Ctrl+Shift+T"), self)
+        duplicate_shortcut.activated.connect(self.duplicate_current_tab)
+        
+    
+    def close_current_tab(self):
+        current_index = self.analysis_tab_widget.currentIndex()
+        self.analysis_tab_widget.close_tab(current_index)
+    
+    def duplicate_current_tab(self):
+        current_index = self.analysis_tab_widget.currentIndex()
+        self.analysis_tab_widget.duplicate_tab(current_index)
+        
+        
+    def open_line_cut(self, extractedData):
+        new_linecut_tab = LineCutPage(extractedData)
+        
+        tab_index = self.analysis_tab_widget.addTab(new_linecut_tab, f"LineCut Tab {self.tab_counter}")
+        
+        self.analysis_tab_widget.setCurrentIndex(tab_index)
+        
+        self.tab_counter += 1

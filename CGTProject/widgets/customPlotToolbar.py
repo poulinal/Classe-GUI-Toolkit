@@ -10,6 +10,9 @@ from PyQt5.QtWidgets import QAction
 class CustomPlotToolbar(NavigationToolbar):
     lineCutModeToggled = pyqtSignal(bool)
     segLineCutModeToggled = pyqtSignal(bool)
+    vertLineCutModeToggled = pyqtSignal(bool)
+    horizLineCutModeToggled = pyqtSignal(bool)
+    vertHorizLineCutModeToggled = pyqtSignal(bool)
     boxCutModeToggled = pyqtSignal(bool)
     resetButtonClicked = pyqtSignal()
     exportData = pyqtSignal()
@@ -65,6 +68,30 @@ class CustomPlotToolbar(NavigationToolbar):
         self.segLinCutAction.setCheckable(True)
         self.segLinCutAction.triggered.connect(self.toggle_seg_line_cut_mode)
         self.addAction(self.segLinCutAction)
+        
+    def add_vert_lincut_button(self):
+        """Add Vertical Line Cut button to the toolbar"""
+        self.vertLinCutAction = QAction("VLine Cut", self)
+        self.vertLinCutAction.setToolTip("Vertical Line Cut Across Data")
+        self.vertLinCutAction.setCheckable(True)
+        self.vertLinCutAction.triggered.connect(self.toggle_verticle_line_cut_mode)
+        self.addAction(self.vertLinCutAction)
+        
+    def add_horiz_lincut_button(self):
+        """Add Horizontal Line Cut button to the toolbar"""
+        self.horizLinCutAction = QAction("HLine Cut", self)
+        self.horizLinCutAction.setToolTip("Horizontal Line Cut Across Data")
+        self.horizLinCutAction.setCheckable(True)
+        self.horizLinCutAction.triggered.connect(self.toggle_horizontal_line_cut_mode)
+        self.addAction(self.horizLinCutAction)
+        
+    def add_vert_horiz_lincut_button(self):
+        """Add Vertical & Horizontal Line Cut button to the toolbar"""
+        self.vertHorizLinCutAction = QAction("V&HLine Cut", self)
+        self.vertHorizLinCutAction.setToolTip("Vertical & Horizontal Line Cut Across Data")
+        self.vertHorizLinCutAction.setCheckable(True)
+        self.vertHorizLinCutAction.triggered.connect(self.toggle_vert_horiz_line_cut_mode)
+        self.addAction(self.vertHorizLinCutAction)
         
     def add_boxcut_button(self):
         """Add Box Cut button to the toolbar"""
@@ -126,3 +153,15 @@ class CustomPlotToolbar(NavigationToolbar):
     def toggle_box_cut_mode(self, checked):
         self.boxCutAction.setChecked(checked)
         self.boxCutModeToggled.emit(checked)
+        
+    def toggle_verticle_line_cut_mode(self, checked):
+        self.vertLinCutAction.setChecked(checked)
+        self.vertLineCutModeToggled.emit(checked)
+        
+    def toggle_horizontal_line_cut_mode(self, checked):
+        self.horizLinCutAction.setChecked(checked)
+        self.horizLineCutModeToggled.emit(checked)
+        
+    def toggle_vert_horiz_line_cut_mode(self, checked):
+        self.vertHorizLinCutAction.setChecked(checked)
+        self.vertHorizLineCutModeToggled.emit(checked)

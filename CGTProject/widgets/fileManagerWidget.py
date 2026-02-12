@@ -1,20 +1,28 @@
 # AP 2026
 
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLineEdit, QWidget, QComboBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLineEdit, QWidget, QComboBox, QLabel
 from PyQt5.QtCore import QDir, pyqtSignal
 import os
 import numpy as np
+
+from CGTProject.utilities.HKLPlaneEnum import HKLPlaneEnum
 
 from nxs_analysis_tools.datasets import cubic
 
 class FileManagerWidget(QWidget):
     pathSelected = pyqtSignal(tuple)  # Emits (dataPathRoot, transformFiles) - Tuple[str, List]
+    submitOptions = pyqtSignal()
+    # temperatureChanged = pyqtSignal(str)  # Emits selected temperature value as str
+    # hklPlaneChanged = pyqtSignal(str)  # Emits selected HKL plane as str
     
     def __init__(self, lastDirectory : str = ''):
         super().__init__()
         self.folderDataPath : str = ""
         self.selectedSampleType : str = ""
         self.selectedSample : str = ""
+        
+        # self.temperatureSelected : str = ""
+        # self.hklPlaneSelected : str = ""
         
         self.setupWidget(lastDirectory)
         
@@ -33,7 +41,7 @@ class FileManagerWidget(QWidget):
         
         useAGeneratedDataset = QPushButton('Use a Generated Dataset')
         
-        submitButton = QPushButton('Submit')
+        self.submitButton = QPushButton('Submit')
 
         getFolderPathLayout = QHBoxLayout()
         getFolderPathLayout.addWidget(self.folderDataPathLineEdit)
@@ -44,14 +52,28 @@ class FileManagerWidget(QWidget):
         self.selectSampleTypeCombo.currentIndexChanged.connect(self._onSampleTypeComboChanged)
         self.selectSampleCombo.currentIndexChanged.connect(self._onSampleComboChanged)
         self.folderDataPathLineEdit.editingFinished.connect(lambda: self.browsePath(lastDirectory))
+        
+        self.changeTemperatureCombo = QComboBox()
+        self.changeTemperatureCombo.setEnabled(False)
+        # self.changeTemperatureCombo.currentIndexChanged.connect(lambda index: self.temperatureChanged.emitself.getTemperatureComboValue()))
+        
+        self.selectHKLPlaneCombo = QComboBox()
+        self.selectHKLPlaneCombo.addItems(HKLPlaneEnum.list())
+        self.selectHKLPlaneCombo.setEnabled(False)
+        # self.selectHKLPlaneCombo.currentIndexChanged.connect(lambda index: self.hklPlaneChanged.emit(self.selectHKLPlaneCombo.currentText()))
+        
         useAGeneratedDataset.clicked.connect(self._onUseAGeneratedDatasetClicked)
-        submitButton.clicked.connect(self._onSubmitButtonClicked)
+        self.submitButton.clicked.connect(self._onSubmitButtonClicked)
+        self.submitButton.setEnabled(False)
         
         fileManagerLayout.addLayout(getFolderPathLayout)
         fileManagerLayout.addWidget(self.selectSampleTypeCombo)
         fileManagerLayout.addWidget(self.selectSampleCombo)
+        fileManagerLayout.addWidget(QLabel("Select Temperature:"))
+        fileManagerLayout.addWidget(self.changeTemperatureCombo)
+        fileManagerLayout.addWidget(self.selectHKLPlaneCombo)
         fileManagerLayout.addWidget(useAGeneratedDataset)
-        fileManagerLayout.addWidget(submitButton)
+        fileManagerLayout.addWidget(self.submitButton)
         self.setLayout(fileManagerLayout)
 
     def _onBrowseButtonClicked(self):
@@ -72,6 +94,10 @@ class FileManagerWidget(QWidget):
         """Handle sample combo box selection change event"""
         self.selectedSample = self.selectSampleCombo.currentText()
         
+        metadata_files = self.getAllSelectedSamplePaths()
+        self.pathSelected.emit((self.getSelectedSamplePath(), metadata_files))
+        self.submitButton.setEnabled(True)
+        
     def _onUseAGeneratedDatasetClicked(self):
         """Handle use a generated dataset button click event"""
         # Using the standard nxrefine filepath:
@@ -82,14 +108,25 @@ class FileManagerWidget(QWidget):
         sample_files = f'{sample_directory}/cubic_15.nxs'
         print(f"Using generated dataset at: {sample_files}")
         self.pathSelected.emit( (sample_directory, [sample_files]) )
+        self.submitButton.setEnabled(True)
         # data = load_transform(f'{sample_directory}/cubic_15.nxs')
         
     def _onSubmitButtonClicked(self):
         """Handle submit button click event"""
         # [transform_files, metadata_files] = self.getAllSelectedSamplePaths()
         # self.pathSelected.emit((self.getSelectedSamplePath(), transform_files, metadata_files))
-        metadata_files = self.getAllSelectedSamplePaths()
-        self.pathSelected.emit((self.getSelectedSamplePath(), metadata_files))
+        # metadata_files = self.getAllSelectedSamplePaths()
+        # self.pathSelected.emit((self.getSelectedSamplePath(), metadata_files))
+        self.submitOptions.emit()
+        
+    def setFileOptionsEnabled(self, enabled: bool):
+        """Enables or disables file options widgets
+
+        Args:
+            enabled (bool): True to enable, False to disable
+        """
+        self.changeTemperatureCombo.setEnabled(enabled)
+        self.selectHKLPlaneCombo.setEnabled(enabled)
             
     def populateSampleTypeCombo(self, folderPath: str):
         """Populates the sample selection combo box with sample names from the given folder path
@@ -117,6 +154,24 @@ class FileManagerWidget(QWidget):
             self.selectSampleCombo.addItems(sampleNames)
         except Exception as e:
             print(f"Error populating sample combo: {e}")
+            
+    def populateTemperatureCombo(self, temperatureValues: list[str]):
+        """Populates the temperature selection combo box with temperature values
+
+        Args:
+            temperatureValues (list[str]): List of temperature values as strings
+        """
+        self.changeTemperatureCombo.clear()
+        try:
+            self.changeTemperatureCombo.addItems(temperatureValues)
+        except Exception as e:
+            print(f"Error populating temperature combo: {e}")
+            
+    def getTemperatureComboValue(self) -> str:
+        return self.changeTemperatureCombo.currentText()
+    
+    def getHKLPlaneComboValue(self) -> str:
+        return self.selectHKLPlaneCombo.currentText()
 
     def browsePath(self, lastDirectory : str = QDir().homePath()) -> str:
         """setups the file dialog to select a directory and sets the path_type to the selected directory
