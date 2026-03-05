@@ -11,6 +11,9 @@ from scipy.ndimage import map_coordinates
 
 from CGTProject.widgets.customPlotToolbar import CustomPlotToolbar
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
+from CGTProject.utilities.quadmeshData import extract_quadmesh_data
+from CGTProject.utilities.NXDataHandler import extractNDArrayFromNXdata, nxlabel
+from nexusformat.nexus import NXdata
 
 class PlottedGraphWidget(QWidget):
     lineCutModeActivated = pyqtSignal(bool)  # Emits True if line cut mode is activated, False otherwise
@@ -21,7 +24,6 @@ class PlottedGraphWidget(QWidget):
         self.colorbar = None  # Track colorbar
         
         self.mouse_dragging = False
-        self.lineCutMode : LineCutModeEnum = None
         
         # Line elements (initially None)
         self.mouse_point : tuple[float, float] = None # (x0, y0)
@@ -56,72 +58,15 @@ class PlottedGraphWidget(QWidget):
         # self.canvas.setStyleSheet("background-color:transparent;")
         # # self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
-        self.initVerticleLineCutTool()
-        self.initHorizontalLineCutTool()
-        self.initVerticleHorizontalLineCutTool()
-        
         layout.addWidget(self.customToolbar)
         layout.addWidget(self.canvas_main)
         # layout.addWidget(self.canvas_profile)
         self.setLayout(layout)
         
-    def initVerticleLineCutTool(self):
-        """Initialize line cut tool components"""
-        self.customToolbar.add_vert_lincut_button()
-        self.customToolbar.vertLineCutModeToggled.connect(self.toggleVerticleLineCutMode)
-        # self.verticle_line_cut_enabled = False
-        
-    def initHorizontalLineCutTool(self):
-        """Initialize line segment cut tool components"""
-        self.customToolbar.add_horiz_lincut_button()
-        self.customToolbar.horizLineCutModeToggled.connect(self.toggleHorizontalLineCutMode)
-        # self.horizontal_line_cut_enabled = False
-        
-    def initVerticleHorizontalLineCutTool(self):
-        """Initialize vertical & horizontal line cut tool components"""
-        self.customToolbar.add_vert_horiz_lincut_button()
-        self.customToolbar.vertHorizLineCutModeToggled.connect(self.toggleVerticleHorizontalLineCutMode) 
-        # self.verticle_horizontal_line_cut_enabled = False
-        
-    def plotQuadMeshData(self, dataQuadMesh : QuadMesh):
-        # self.canvas.draw()
-        if dataQuadMesh is not None:
-            
-            # Remove old colorbar if it exists
-            if self.colorbar is not None:
-                print(self.colorbar)
-                self.colorbar.remove()
-                self.colorbar = None
-                
-            self.ax_main.clear()
-            # self.figure.clear()
-            
-            X, Y, Z = self.extract_quadmesh_data(dataQuadMesh)
-            self.quadmesh = self.ax_main.pcolormesh(X, Y, Z, shading='auto')
-            
-            # Store reference to new colorbar
-            self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
-            
-            self.canvas_main.draw()
-            
-    # Extract data from existing QuadMesh
-    def extract_quadmesh_data(self, quadmesh : QuadMesh):
-        """Get X, Y, Z arrays from QuadMesh object"""
-        # Get the array data
-        array = quadmesh.get_array()
-        coords = quadmesh.get_coordinates()
-        
-        # Coordinates define cell corners, data is cell centers
-        M, N = coords.shape[:2]
-        Z = array.reshape(M-1, N-1)  # Data is one smaller in each dimension
-        
-        X = coords[:, :, 0]
-        Y = coords[:, :, 1]
-        return X, Y, Z
     
     def updateQuadMeshPlot(self, dataQuadMesh : QuadMesh):
         if dataQuadMesh is not None:
-            X, Y, Z = self.extract_quadmesh_data(dataQuadMesh)
+            X, Y, Z = extract_quadmesh_data(dataQuadMesh)
             # Remove old colorbar if it exists
             if self.colorbar is not None:
                 print(self.colorbar)
@@ -131,78 +76,47 @@ class PlottedGraphWidget(QWidget):
             self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
             self.canvas_main.draw()
             
-    def toggleVerticleLineCutMode(self, enabled: bool):
-        """Enable or disable line cut mode"""
-        # if enabled and (self.horizontal_line_cut_enabled or self.verticle_horizontal_line_cut_enabled):
-        if enabled and self.lineCutMode != LineCutModeEnum.VERTICAL:
-            self.customToolbar.toggle_horizontal_line_cut_mode(False)
-            self.customToolbar.toggle_vert_horiz_line_cut_mode(False)
-        if enabled:
-            print("Line Cut Mode Enabled")
-            # self.verticle_line_cut_enabled = True
-            self.lineCutMode = LineCutModeEnum.VERTICAL
-            #create initial line in center of plot
-            self.mouse_point = self.getCenterOfPlot()
-            self.update_line_display()
-            self.lineCutModeActivated.emit(True)
-        else:
-            print("Line Cut Mode Disabled")
-            # self.verticle_line_cut_enabled = False
-            self.lineCutMode = None
-            self.remove_line()
-            self.lineCutModeActivated.emit(False)
-            
-    def toggleHorizontalLineCutMode(self, enabled: bool):
-        """Enable or disable segmented line cut mode"""
-        # if enabled and (self.verticle_line_cut_enabled or self.verticle_horizontal_line_cut_enabled):
-        if enabled and self.lineCutMode != LineCutModeEnum.HORIZONTAL:
-            self.customToolbar.toggle_verticle_line_cut_mode(False)
-            self.customToolbar.toggle_vert_horiz_line_cut_mode(False)
-        if enabled:
-            print("Segmented Line Cut Mode Enabled")
-            # self.horizontal_line_cut_enabled = True
-            self.lineCutMode = LineCutModeEnum.HORIZONTAL
-            #create initial line in center of plot
-            self.mouse_point = self.getCenterOfPlot()
-            self.update_line_display()
-            self.lineCutModeActivated.emit(True)
-        else:
-            print("Segmented Line Cut Mode Disabled")
-            # self.horizontal_line_cut_enabled = False
-            self.lineCutMode = None
-            self.remove_line()
-            self.lineCutModeActivated.emit(False)
-            
-    def toggleVerticleHorizontalLineCutMode(self, enabled: bool):
-        """Enable or disable vertical & horizontal line cut mode"""
-        # if enabled and (self.verticle_line_cut_enabled or self.horizontal_line_cut_enabled):
-        if enabled and self.lineCutMode != LineCutModeEnum.BOTH:
-            self.customToolbar.toggle_verticle_line_cut_mode(False)
-            self.customToolbar.toggle_horizontal_line_cut_mode(False)
-        if enabled:
-            print("Vert & Horiz Line Cut Mode Enabled")
-            # self.verticle_horizontal_line_cut_enabled = True
-            self.lineCutMode = LineCutModeEnum.BOTH
-            #create initial line in center of plot
-            self.mouse_point = self.getCenterOfPlot()
-            self.update_line_display()
-            self.lineCutModeActivated.emit(True)
-        else:
-            print("Vert & Horiz Line Cut Mode Disabled")
-            # self.verticle_horizontal_line_cut_enabled = False
-            self.lineCutMode = None
-            self.remove_line()
+    def updateNXDataPlot(self, extractedData : NXdata):
+        x_data, y_data = extractNDArrayFromNXdata(extractedData)
+        print(f"Plotting line cut with x_data: {x_data}, y_data: {y_data}, with lengths x: {len(x_data)}, y: {len(y_data)}")
+
+        self.ax_main.clear()
+        self.ax_main.plot(x_data, y_data)
+        self.ax_main.set_xlabel(nxlabel(extractedData.nxaxes[0]))
+        self.ax_main.set_ylabel(nxlabel(extractedData.nxsignal))
+        self.ax_main.set_title(extractedData.nxtitle)
+        # self.ax_main.draw()
+        self.canvas_main.draw()
+        
+    def updateXYPlot(self, x_data : np.ndarray, y_data : np.ndarray, xlabel: str = "X", ylabel: str = "Y", title: str = "XY Plot", marker: str = 'o', label: str = None, linestyle: str = None, holdprevious:bool = False):
+        if not holdprevious:
+            self.ax_main.clear()
+        self.ax_main.plot(x_data, y_data, marker=marker, label=label, linestyle=linestyle)
+        self.ax_main.set_xlabel(xlabel)
+        self.ax_main.set_ylabel(ylabel)
+        self.ax_main.set_title(title)
+        self.ax_main.legend()
+        self.canvas_main.draw()
             
     def on_press(self, event):
         """Check if clicking near a line endpoint"""
         if event.inaxes != self.ax_main:
             return
         
-        if not self.lineCutMode: #neither activated
+        # if not self.lineCutMode: #neither activated
+        #     return
+        if not self.on_press_line_mode_check(event): #not enabled so dont calculate
             return
         
         self.mouse_point = (event.xdata, event.ydata)
         self.mouse_dragging = True
+        self.on_press_line_mode(event)
+        
+    def on_press_line_mode(self, event):
+        pass
+        
+    def on_press_line_mode_check(self, event):
+        return False
     
     def on_motion(self, event):
         """Drag the selected endpoint"""
@@ -214,74 +128,20 @@ class PlottedGraphWidget(QWidget):
             return
         
         self.mouse_point = (event.xdata, event.ydata)
+        self.on_motion_line_mode(event)
         
-        if self.lineCutMode == LineCutModeEnum.BOTH:
-            print("vert horiz line cut mode")
-            #will plot a cross line
-            self.update_line_display()
-        
-        if self.lineCutMode == LineCutModeEnum.VERTICAL:
-            print("vert line cut mode")
-            self.update_line_display()
-            
-        if self.lineCutMode == LineCutModeEnum.HORIZONTAL:
-            print("horiz line cut mode")
-            self.update_line_display()
+    def on_motion_line_mode(self, event):
+        pass
             
     def on_release(self, event):
         """Stop dragging"""
         # self.mouse_point = None
         self.mouse_dragging = False
         # self.extract_line_cut()  # Auto-update profile
-        
-    def update_line_display(self):
-        """Update line position on plot"""
-        if not self.lineRef:
-            #create empty Line2D object
-            self.lineRef = [Line2D([], [], color='red')]
-            self.ax_main.add_line(self.lineRef[0])
-        
-        x0, y0 = self.mouse_point
-        
-        print(f"Updating line display at point: ({x0}, {y0})")
-        
-        if self.lineCutMode == LineCutModeEnum.VERTICAL:
-            x_vals = [x0, x0]
-            y_vals = [self.ax_main.get_ylim()[0], self.ax_main.get_ylim()[1]]
-            
-        elif self.lineCutMode == LineCutModeEnum.HORIZONTAL:
-            x_vals = [self.ax_main.get_xlim()[0], self.ax_main.get_xlim()[1]]
-            y_vals = [y0, y0]
-            
-        elif self.lineCutMode == LineCutModeEnum.BOTH:  # BOTH
-            # vert line
-            x_vals_vert = [x0, x0]
-            y_vals_vert = [self.ax_main.get_ylim()[0], self.ax_main.get_ylim()[1]]
-            self.lineRef[0].set_data(x_vals_vert, y_vals_vert)
-            # horiz line
-            x_vals_horiz = [self.ax_main.get_xlim()[0], self.ax_main.get_xlim()[1]]
-            y_vals_horiz = [y0, y0]
-            if len(self.lineRef) < 2:
-                self.lineRef.append(Line2D([], [], color='red'))
-                self.ax_main.add_line(self.lineRef[1])
-            self.lineRef[1].set_data(x_vals_horiz, y_vals_horiz)
-            self.canvas_main.draw_idle()
-            return
-        
-        self.lineRef[0].set_data(x_vals, y_vals)
-        self.canvas_main.draw_idle()
+        self.on_release_line_mode(event)
     
-    def remove_line(self):
-        """Remove line and points from plot"""
-        if self.lineRef:
-            for line in self.lineRef:
-                line.remove()
-            self.lineRef = None
-        
-        # Clear profile
-        self.ax_profile.clear()
-        self.ax_profile.set_title('Line Profile (disabled)')
-        self.canvas_profile.draw()
+    def on_release_line_mode(self, event):
+        pass
         
     def getMousePoint(self) -> tuple[float, float]:
         """Get current mouse point (x, y)"""
@@ -311,9 +171,6 @@ class PlottedGraphWidget(QWidget):
             print(f"dimensions: {(height, width)}, centered at ({x_center}, {y_center})")
             return height, width, x_center, y_center, x_vals.max(), x_vals.min(), y_vals.max(), y_vals.min()
         return 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-
-    def getLineCutMode(self) -> LineCutModeEnum:
-        return self.lineCutMode
     
     def changeColorMap(self, new_cmap: str):
         """Change the colormap of the current plot
@@ -324,4 +181,16 @@ class PlottedGraphWidget(QWidget):
         if self.quadmesh is not None:
             self.quadmesh.set_cmap(new_cmap)
             self.canvas_main.draw_idle()
+            
+    def remove_line(self):
+        """Remove line and points from plot"""
+        if self.lineRef:
+            for line in self.lineRef:
+                line.remove()
+            self.lineRef = None
+        
+        # Clear profile
+        self.ax_profile.clear()
+        self.ax_profile.set_title('Line Profile (disabled)')
+        self.canvas_profile.draw()
       

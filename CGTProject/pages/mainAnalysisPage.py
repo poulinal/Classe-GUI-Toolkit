@@ -3,8 +3,9 @@ from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, 
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal
 
 from CGTProject.widgets.fileManagerWidget import FileManagerWidget
-from CGTProject.models.classeDataModel import ClasseDataModel
+from CGTProject.models.temperatureDataModel import TemperatureDataModel
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
+from CGTProject.widgets.plottedLineModesGraphWidget import PlottedLineModesGraphWidget
 from CGTProject.widgets.lineCutOptionsDialogue import LineCutOptionsDialogue
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
 
@@ -23,7 +24,7 @@ class MainAnalysisPage(QWidget):
         
         self.initUI()
         
-        self.classeDataModel : ClasseDataModel = None # Placeholder for ClasseDataModel instance
+        self.temperatureDataModel : TemperatureDataModel = None # Placeholder for temperatureDataModel instance
         
     def initUI(self):
         
@@ -40,7 +41,7 @@ class MainAnalysisPage(QWidget):
         self.back_btn = QPushButton("← Back to Main Menu")
         layout.addWidget(self.back_btn, 6, 0, 1, 3)
 
-        self.plotted_graph_widget = PlottedGraphWidget()
+        self.plotted_graph_widget = PlottedLineModesGraphWidget()
         self.plotted_graph_widget.lineCutModeActivated.connect(self.onLineCutModeActivated)
         layout.addWidget(self.plotted_graph_widget, 3, 0, 1, 2)
 
@@ -83,7 +84,7 @@ class MainAnalysisPage(QWidget):
 
         self.setLayout(layout)
         
-    def onDataPathSelected(self, filePathTuple : tuple[str, list, list]):
+    def onDataPathSelected(self, filePathTuple : tuple[str, list]):
         print(f"Data path selected: {filePathTuple}")
         # Save last directory
         self.settings.setValue('lastDirectory', filePathTuple[0])
@@ -91,28 +92,28 @@ class MainAnalysisPage(QWidget):
         
         self.loadData(filePathTuple)
         
-    def loadData(self, filePathTuple : tuple[str, list, list]):
+    def loadData(self, filePathTuple : tuple[str, list]):
         # Placeholder for data loading logic
         print(f"Loading data from: {filePathTuple[0]}")
         # data : NXdata = load_transform(filePathTuple[0])
-        self.classeDataModel = ClasseDataModel(filePathTuple)
-        self.classeDataModel.setIndex(self.plotSliderWidget.value())
+        self.temperatureDataModel = TemperatureDataModel(filePathTuple)
+        self.temperatureDataModel.setIndex(self.plotSliderWidget.value())
         
-        self.file_manager_widget.populateTemperatureCombo(self.classeDataModel.getTemperatureValues())
+        self.file_manager_widget.populateTemperatureCombo(self.temperatureDataModel.getTemperatureValues())
         self.file_manager_widget.setFileOptionsEnabled(True)
         
         
     def onPlotSliderValueChanged(self, value):
         print(f"Plot slider value changed: {value}")
-        self.classeDataModel.setIndex(value)
+        self.temperatureDataModel.setIndex(value)
         self.redrawPlot()
             
     def onFileOptionsComboChanged(self):
         print(f"Temperature combo changed: {self.file_manager_widget.getTemperatureComboValue()}")
-        self.classeDataModel.setTemperature(self.file_manager_widget.getTemperatureComboValue())
-        self.classeDataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
+        self.temperatureDataModel.setTemperature(self.file_manager_widget.getTemperatureComboValue())
+        self.temperatureDataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
         
-        self.plotSliderWidget.setMaximum(self.classeDataModel.getMaxDepth())
+        self.plotSliderWidget.setMaximum(self.temperatureDataModel.getMaxDepth())
         self.plotSliderWidget.setEnabled(True)
         
         # self.preLoadPlotsOption.setEnabled(True)
@@ -123,11 +124,11 @@ class MainAnalysisPage(QWidget):
         if state == Qt.Checked:
             print("Pre-load all data option enabled")
             # Placeholder for pre-loading all data into memory
-            # self.classeDataModel.preloadAllData()
+            # self.temperatureDataModel.preloadAllData()
         else:
             print("Pre-load all data option disabled")
             # Placeholder for disabling pre-loading
-            # self.classeDataModel.unloadData()
+            # self.temperatureDataModel.unloadData()
             
     def onLineCutModeActivated(self):
         if self.plotted_graph_widget.getLineCutMode() == LineCutModeEnum.VERTICAL:
@@ -142,21 +143,15 @@ class MainAnalysisPage(QWidget):
             self.plotSubmitHLineCut.setEnabled(True)
         
     def redrawPlot(self):
-        if self.classeDataModel:
-            quad_mesh_data = self.classeDataModel.getQuadMeshAtCurrentIndex()
+        if self.temperatureDataModel:
+            quad_mesh_data = self.temperatureDataModel.getQuadMeshAtCurrentIndex()
             if quad_mesh_data:
                 self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data)
-                
-    def initialPlot(self):
-        if self.classeDataModel:
-            quad_mesh_data = self.classeDataModel.getQuadMeshAtCurrentIndex()
-            if quad_mesh_data:
-                self.plotted_graph_widget.plotQuadMeshData(quad_mesh_data)
                 
     def onSubmitLineCut(self, verticle : bool):
         print("Submit Line Cut button clicked")
         # Placeholder for line cut submission logic
-        lineCutOptionsDialog = LineCutOptionsDialogue(self.classeDataModel.getHKLPlane(), mousePos = self.plotted_graph_widget.getMousePoint(), currentData = self.classeDataModel.getCurrentData(), dataAxisMinMax=(self.classeDataModel.getDataAxisMinMax(0), self.classeDataModel.getDataAxisMinMax(1), self.classeDataModel.getDataAxisMinMax(2)), dataAxisResolutions=(self.classeDataModel.getDataAxisResolution(0), self.classeDataModel.getDataAxisResolution(1), self.classeDataModel.getDataAxisResolution(2)))
+        lineCutOptionsDialog = LineCutOptionsDialogue(self.temperatureDataModel.getHKLPlane(), mousePos = self.plotted_graph_widget.getMousePoint(), currentData = self.temperatureDataModel.getCurrentData(), dataAxisMinMax=(self.temperatureDataModel.getDataAxisMinMax(0), self.temperatureDataModel.getDataAxisMinMax(1), self.temperatureDataModel.getDataAxisMinMax(2)), dataAxisResolutions=(self.temperatureDataModel.getDataAxisResolution(0), self.temperatureDataModel.getDataAxisResolution(1), self.temperatureDataModel.getDataAxisResolution(2)))
         
         if lineCutOptionsDialog.exec_() == QDialog.Accepted:
             print("Line cut options accepted")
@@ -164,7 +159,7 @@ class MainAnalysisPage(QWidget):
             line_cut_options = lineCutOptionsDialog.getLineCutOptions()
             print(f"Line cut options: {line_cut_options}")
             # Apply line cut options to the data model
-            extractedData = self.classeDataModel.applyLineCutOptions(line_cut_options, self.plotted_graph_widget.getMousePoint(), verticle)
+            extractedData = self.temperatureDataModel.applyLineCutOptions(line_cut_options, self.plotted_graph_widget.getMousePoint(), verticle)
             if extractedData:
                 self.openExtractedData.emit(extractedData)
             else:
@@ -209,7 +204,7 @@ class MainAnalysisPage(QWidget):
             
     def applySkewAngle(self, angle):
         print(f"Applying skew angle: {angle}")
-        quadmesh = self.classeDataModel.updateSkewAngle(angle)
+        quadmesh = self.temperatureDataModel.updateSkewAngle(angle)
         self.plotted_graph_widget.updateQuadMeshPlot(quadmesh)
         
     def changeColormap(self, newCmap):

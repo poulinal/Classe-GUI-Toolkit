@@ -1,117 +1,64 @@
 # AP 2026
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QPushButton, QTableWidget, QTableWidgetItem
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.collections import QuadMesh
-from CGTProject.models.classeDataModel import ClasseDataModel
+from CGTProject.models.temperatureDataModel import TemperatureDataModel
 from CGTProject.widgets.analysisOptionsWidget import AnalysisOptionsWidget
+from CGTProject.widgets.plottedLineCutGraphWidget import PlottedLineCutGraphWidget
+from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
+from CGTProject.utilities.NXDataHandler import extractNDArrayFromNXdata, nxlabel, trimNXdataToAxisLimits
 import numpy as np
 
 from nexusformat.nexus import NXdata, NeXusError, nxsetmemory, NXfield
-def centers(axis, dimlen):
-    """Return the centers of the axis bins.
-
-    This works regardless of whether the axis consists of bin boundaries,
-    i.e, `dimlen = len(axis) + 1``, or centers, i.e., `dimlen = len(axis)`.
-
-    Parameters
-    ----------
-    axis : ndarray
-        Array containing the axis values.
-    dimlen : int
-        Length of corresponding data dimension.
-
-    Returns
-    -------
-    ndarray
-        Array of bin centers with a size of dimlen.
-    """
-    ax = axis.astype(np.float64)
-    if ax.shape[0] == dimlen+1:
-        return (ax[:-1] + ax[1:])/2
-    else:
-        assert ax.shape[0] == dimlen
-        return ax
-
-
-def boundaries(axis, dimlen):
-    """Return the axis bin boundaries.
-
-    This works regardless of whether the axis consists of bin boundaries,
-    i.e, dimlen = len(axis) + 1, or centers, i.e., dimlen = len(axis).
-
-    Parameters
-    ----------
-    axis : ndarray
-        Array containing the axis values.
-    dimlen : int
-        Length of corresponding data dimension.
-
-    Returns
-    -------
-    ndarray
-        Array of bin boundaries with a size of dimlen + 1.
-    """
-    ax = axis.astype(np.float64)
-    if ax.shape[0] == dimlen:
-        start = ax[0] - (ax[1] - ax[0])/2
-        end = ax[-1] + (ax[-1] - ax[-2])/2
-        return np.concatenate((np.atleast_1d(start),
-                               (ax[:-1] + ax[1:])/2,
-                               np.atleast_1d(end)))
-    else:
-        assert ax.shape[0] == dimlen + 1
-        return ax
-
-
-def label(field):
-    """Return a label for a data field suitable for use on a graph axis.
-
-    This returns the attribute 'long_name' if it exists, or the field name,
-    followed by the units attribute if it exists.
-
-    Parameters
-    ----------
-    field : NXfield
-        NeXus field used to construct the label.
-
-    Returns
-    -------
-    str
-        Axis label.
-    """
-    if 'long_name' in field.attrs:
-        return field.long_name
-    elif 'units' in field.attrs:
-        return f"{field.nxname} ({field.units})"
-    else:
-        return field.nxname
+from nxs_analysis_tools.fitting import LinecutModel
+from lmfit.models import GaussianModel, LinearModel
+from lmfit.parameter import Parameter
 
 class LineCutPage(QWidget):
     def __init__(self, extractedData : NXdata):
         super().__init__()
         layout = QVBoxLayout()
         
-        self.lineCutFigure = Figure(figsize=(8, 6), dpi=100)
-        self.lineCutCanvas = FigureCanvas(self.lineCutFigure)
-        self.lineCutAxes = self.lineCutFigure.add_subplot(111)
-        self.plotNXData(extractedData)
+        # self.lineCutFigure = Figure(figsize=(8, 6), dpi=100)
+        # self.lineCutCanvas = FigureCanvas(self.lineCutFigure)
+        # self.lineCutAxes = self.lineCutFigure.add_subplot(111)
+        # self.plotNXData(extractedData)
+        self.extractedData = extractedData
+        self.plottedLineCutWidget = PlottedLineCutGraphWidget()
+        self.plottedLineCutWidget.lineCutModeActivated.connect(self.onLineCutModeActivated)
         
         #filter options toggle checkbox
         analysisOptionsLayout = QVBoxLayout() #sub layout for filter options toggle and filter options widget
         self.analysisOptionsToggle = QPushButton("▶ Show Filter Options")
         self.analysisOptionsToggle.setCheckable(True)
+        self.analysisOptionsToggle.setEnabled(False)
         self.analysisOptionsToggle.clicked.connect(self.toggleFilterOptions)
         self.analysisOptionsWidget = AnalysisOptionsWidget()
+        self.analysisOptionsWidget.fitLineCut.connect(lambda fitType, compositeModels: self.fitLineCut(fitType, compositeModels))
         self.analysisOptionsWidget.hide() #start hidden
-        # self.analysisOptionsWidget.gaussianFilter.connect(lambda state, sigma: self.setGaussianFilter(state, sigma))
+    
+        #lm.params gives a table of parameters
+        self.LMParams = QTableWidget()
+        self.LMParams.setRowCount(7)
+        self.LMParams.setColumnCount(7)
+        self.LMParams.setHorizontalHeaderLabels(["Name", "Value", "Initial Value", "Min", "Max", "Vary", "Expression"])
+        self.LMParams.setVisible(False) #start hidden, only show when fit is performed
+        
         analysisOptionsLayout.addWidget(self.analysisOptionsToggle)
         analysisOptionsLayout.addWidget(self.analysisOptionsWidget)
+        analysisOptionsLayout.addWidget(self.LMParams)
         layout.addLayout(analysisOptionsLayout)
         
+        self.redrawPlot()
         
-        layout.addWidget(self.lineCutCanvas)
+        
+        layout.addWidget(self.plottedLineCutWidget)
         self.setLayout(layout)
+        
+    def redrawPlot(self):
+        if self.extractedData:
+            self.plottedLineCutWidget.updateNXDataPlot(self.extractedData)
         
     def toggleFilterOptions(self):
         if self.analysisOptionsToggle.isChecked():
@@ -123,42 +70,183 @@ class LineCutPage(QWidget):
             # self.layoutCol2Row2.removeWidget(self.lineCoords)
             self.analysisOptionsWidget.hide()
             
-    def extractNDArrayFromNXdata(self, extractedData : NXdata) -> tuple[np.ndarray, np.ndarray]:
-        nxdata = extractedData
-        # Get axis name(s) from @axes attribute
-        axes_attr = nxdata.attrs['axes']
-        if isinstance(axes_attr, str):
-            axis_names = [axes_attr]  # Single axis
+    def onLineCutModeActivated(self, enabled: bool):
+        if enabled:
+            print("Line cut mode activated - enable filter options")
+            self.analysisOptionsToggle.setEnabled(True)
         else:
-            axis_names = list(axes_attr)  # Multiple axes
-
-        # Get signal name from @signal attribute
-        signal_name = nxdata.attrs['signal']
-
-        # Extract data as numpy arrays
-        axes_data = [np.array(nxdata[name]) for name in axis_names]
-        signal_data = np.array(nxdata[signal_name])
-
-        # For single axis case:
-        x_data = axes_data[0]
-        y_data = signal_data
+            print("Line cut mode deactivated - disable filter options")
+            self.analysisOptionsToggle.setEnabled(False)
+            
+    def fitLineCut(self, fitType: str, compositeModels: list[str]):
+        print(f"Fitting LineCut with FitType: {fitType}, CompositeModels: {compositeModels}")
+        #get teh range of self.extractedData between the two vertical lines if in vertical line cut mode, otherwise use the whole range
+        twoVertLines = self.plottedLineCutWidget.getTwoVertLines()
         
-        # if 2D
-        # axes_data[0] -> Qh, axes_data[1] -> Qk
-        # X, Y = np.meshgrid(axes_data[0], axes_data[1])
-        # plt.pcolormesh(X, Y, signal_data)
-        return x_data, y_data
         
-    def plotNXData(self, extractedData : NXdata):
-        x_data, y_data = self.extractNDArrayFromNXdata(extractedData)
-        print(f"Plotting line cut with x_data: {x_data}, y_data: {y_data}, with lengths x: {len(x_data)}, y: {len(y_data)}")
+        # x1, x2 = twoVertLines
+        # filtered_data = trimNXdataToAxisLimits(self.extractedData, axis_index=0, min_val=min(x1, x2), max_val=max(x1, x2))
+        
+        # Get full x, y for display
+        _full_lm = LinecutModel(data=self.extractedData)
+        x = _full_lm.x
+        y = _full_lm.y
 
-        self.lineCutAxes.clear()
-        self.lineCutAxes.plot(x_data, y_data)
-        self.lineCutAxes.set_xlabel(label(extractedData.nxaxes[0]))
-        self.lineCutAxes.set_ylabel(label(extractedData.nxsignal))
-        self.lineCutAxes.set_title(extractedData.nxtitle)
-        self.lineCutCanvas.draw()
+        # Create fitting model on the trimmed range if twoVertLines is set
+        if twoVertLines is not None:
+            x1, x2 = twoVertLines
+            mask = (x >= min(x1, x2)) & (x <= max(x1, x2)) ##TODO : can i make this more modular instead of hard coding attrs
+            x_fit, y_fit = x[mask], y[mask]
+            signal_name = self.extractedData.attrs['signal']
+            axes_attr = self.extractedData.attrs['axes']
+            axis_name = axes_attr if isinstance(axes_attr, str) else list(axes_attr)[0]
+            _fit_data = NXdata()
+            _fit_data.attrs['axes'] = axis_name
+            _fit_data.attrs['signal'] = signal_name
+            _fit_data[axis_name] = NXfield(x_fit)
+            _fit_data[signal_name] = NXfield(y_fit)
+            lm = LinecutModel(data=_fit_data)
+        else:
+            lm = LinecutModel(data=self.extractedData)
+
+        self.LMParams.setVisible(True)  # Show the parameters table when fit is performed
+
+        #model: set_model_components(GaussianModel(prefix='peak'))
+        #list of models: set_model_components(GaussianModel(prefix='peak'), LinearModel(prefix='background')])
+        #composite: set_model_components(GaussianModel(prefix='peak') + LinearModel(prefix='background'))
+        if fitType == "Model":
+            model_name = compositeModels[0] if compositeModels else None
+            if model_name == "Gaussian":
+                model = GaussianModel(prefix='peak')
+            elif model_name == "Linear":
+                model = LinearModel(prefix='background')
+            else:
+                print(f"Unsupported model type: {model_name}")
+                return
+            lm.set_model_components(model)
+        elif fitType == "Composite":
+            model_components = []
+            for modeli, model_name in enumerate(compositeModels):
+                if model_name == "Gaussian":
+                    model_components.append(GaussianModel(prefix=f'peak{modeli}'))
+                elif model_name == "Linear":
+                    model_components.append(LinearModel(prefix=f'background{modeli}'))
+                else:
+                    print(f"Unsupported model type: {model_name}")
+                    return
+            print(model_components)
+            composite_model = model_components[0]
+            for m in model_components[1:]:
+                composite_model += m
+            lm.set_model_components(composite_model)
+        elif fitType == "List Of Models":
+            model_components = []
+            for modelj, model_name in enumerate(compositeModels):
+                if model_name == "Gaussian":
+                    model_components.append(GaussianModel(prefix=f'peak{modelj}'))
+                elif model_name == "Linear":
+                    model_components.append(LinearModel(prefix=f'background{modelj}'))
+                else:
+                    print(f"Unsupported model type: {model_name}")
+                    return
+            # lm.set_model_components(*model_components)
+            lm.set_model_components(model_components)
+        else:
+            print(f"Unsupported FitType: {fitType}")
+            return
+        
+        # trimmedX is the x range used for fitting (already trimmed to twoVertLines range if set)
+        trimmedX = lm.x
+        lm.guess()
+
+        # # For multiple Gaussians, spread initial centers using peak detection
+        # if fitType in ("Composite", "List Of Models"):
+        #     from scipy.signal import find_peaks
+        #     gaussian_indices = [i for i, m in enumerate(compositeModels) if m == "Gaussian"]
+        #     if len(gaussian_indices) > 1:
+        #         fy = lm.y
+        #         fx = lm.x
+        #         min_dist = max(1, len(fx) // (len(gaussian_indices) + 1))
+        #         peaks_idx, _ = find_peaks(fy, distance=min_dist)
+        #         if len(peaks_idx) >= len(gaussian_indices):
+        #             # Pick the tallest N peaks, sorted by position
+        #             top_n = np.argsort(fy[peaks_idx])[-len(gaussian_indices):]
+        #             peak_positions = np.sort(fx[peaks_idx[np.sort(top_n)]])
+        #         else:
+        #             # Fall back: evenly space centers across the range
+        #             peak_positions = np.linspace(fx.min(), fx.max(), len(gaussian_indices) + 2)[1:-1]
+        #         for i, pos in zip(gaussian_indices, peak_positions):
+        #             lm.params[f'peak{i}center'].set(value=pos)
+        #             print(f"Initialized peak{i}center = {pos}")
+
+        lmparams : Parameter = lm.params
+        
+        # lm.plot_initial_guess()
+        lm.fit()
+        # lm.plot_fit()
+        
+        # Update the table with parameter values
+        # self.LMParams.setRowCount(len(lmparams))
+        for i, (param_name, param) in enumerate(lmparams.items()):
+            self.LMParams.setItem(i, 0, QTableWidgetItem(param_name))
+            self.LMParams.setItem(i, 1, QTableWidgetItem(str(param.value)))
+            self.LMParams.setItem(i, 2, QTableWidgetItem(str(param.init_value)))
+            self.LMParams.setItem(i, 3, QTableWidgetItem(str(param.min)))
+            self.LMParams.setItem(i, 4, QTableWidgetItem(str(param.max)))
+            self.LMParams.setItem(i, 5, QTableWidgetItem(str(param.vary)))
+            self.LMParams.setItem(i, 6, QTableWidgetItem(str(param.expr)))
+        # if numpoints is None:
+        #     numpoints = len(self.x)
+        # self.x_eval = np.linspace(self.x.min(), self.x.max(), numpoints)
+        # self.y_eval = self.modelresult.eval(x=self.x_eval)
+        # self.y_eval_components = self.modelresult.eval_components(x=self.x_eval)
+        # self.modelresult.plot(numpoints=numpoints, **kwargs)
+        # ax = plt.gca()
+        # for model_component, value in self.y_eval_components.items():
+        #     ax.fill_between(self.x_eval, value, alpha=0.3, label=model_component)
+        #     # ax.plot(self.x_eval, value, label=model_component)
+        # plt.legend()
+        # plt.show()
+        # if fit_report:
+        #     print(self.modelresult.fit_report())
+        # return ax
+        
+        numpoints=None
+        model = lm.model
+        params = lm.params
+        y_init_fit = model.eval(params=params, x=trimmedX)
+        
+        #open a new PlottedGraphWidget as a new window to show the initial fit guess
+        self.initialFitPlot = PlottedGraphWidget()
+        self.initialFitPlot.updateXYPlot(x, y, marker='o', label='data')
+        # self.initialFitPlot.updateXYPlot(trimmedX, y_init_fit, linestyle='--', label='initial guess', holdprevious=True)
+        # self.initialFitPlot.ax_main.legend()
+        # plt.plot(x, y, 'o', label='data')
+        # plt.plot(x, y_init_fit, '--', label='guess')
+
+        # Plot the components of the model
+        if numpoints is None:
+            numpoints = len(lm.x)
+        # x_eval = np.linspace(lm.x.min(), lm.x.max(), numpoints)
+        x_eval = np.linspace(trimmedX.min(), trimmedX.max(), numpoints)
+        y_init_fit_components = model.eval_components(params=params, x=x_eval)
+        for component in y_init_fit_components.keys():
+            print(f"Model component: {component}")
+            self.initialFitPlot.updateXYPlot(x_eval, y_init_fit_components[component], linestyle='--', label=component+'fit', holdprevious=True)
+        self.initialFitPlot.ax_main.legend()
+        ax = self.initialFitPlot.ax_main
+        for model_component, value in y_init_fit_components.items():
+            ax.fill_between(x_eval, value, alpha=0.3, label=model_component)
+            
+        
+        #show widget as new window
+        self.initialFitPlot.show()
+        ###TODO
+        #make modelType and compositeModel in enums
+        #fix why the data is getting changed when we plot the fit guess
+        #do 3dpdf
+        
+    
         
     # def plotNXData(self, extractedData : NXdata, fmt=None, xmin=None, xmax=None,
     #          ymin=None, ymax=None, vmin=None, vmax=None, **kwargs):
