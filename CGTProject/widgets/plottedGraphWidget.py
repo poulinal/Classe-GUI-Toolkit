@@ -1,5 +1,5 @@
 # AP 2026
-from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSizePolicy
 from PyQt5.QtCore import pyqtSignal
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -43,10 +43,17 @@ class PlottedGraphWidget(QWidget):
         # Create two figures: main plot and line profile
         self.fig_main = Figure(figsize=(8, 6))
         self.canvas_main = FigureCanvas(self.fig_main)
+        # Allow the main canvas to expand to fill available space
+        self.canvas_main.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.canvas_main.updateGeometry()
+        self.canvas_main.setMinimumHeight(300)
         self.ax_main = self.fig_main.add_subplot(111)
         
         self.fig_profile = Figure(figsize=(8, 3))
         self.canvas_profile = FigureCanvas(self.fig_profile)
+        self.canvas_profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.canvas_profile.updateGeometry()
+        self.canvas_profile.setMinimumHeight(100)
         self.ax_profile = self.fig_profile.add_subplot(111)
         
         self.customToolbar = CustomPlotToolbar(self.canvas_main, self)
@@ -59,9 +66,11 @@ class PlottedGraphWidget(QWidget):
         # # self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         layout.addWidget(self.customToolbar)
-        layout.addWidget(self.canvas_main)
+        layout.addWidget(self.canvas_main, 1)
         # layout.addWidget(self.canvas_profile)
         self.setLayout(layout)
+        # Make the widget expand when placed in layouts
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
     
     def updateQuadMeshPlot(self, dataQuadMesh : QuadMesh):
@@ -75,6 +84,8 @@ class PlottedGraphWidget(QWidget):
             self.quadmesh = self.ax_main.pcolormesh(X, Y, Z, shading='auto')
             self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
             self.canvas_main.draw()
+        else:
+            print("WARNING... dataQuadMesh is None, cannot updateQuadMeshPlot")
             
     def updateNXDataPlot(self, extractedData : NXdata):
         x_data, y_data = extractNDArrayFromNXdata(extractedData)
@@ -96,6 +107,21 @@ class PlottedGraphWidget(QWidget):
         self.ax_main.set_ylabel(ylabel)
         self.ax_main.set_title(title)
         self.ax_main.legend()
+        self.canvas_main.draw()
+        
+    def updatePColorMeshPlot(self, data, xlabel: str = "X", ylabel: str = "Y", title: str = "PColorMesh Plot", cmap: str = 'viridis'):
+        self.ax_main.clear()
+        self.quadmesh = self.ax_main.pcolormesh(data, shading='auto', cmap=cmap)
+        self.ax_main.set_xlabel(xlabel)
+        self.ax_main.set_ylabel(ylabel)
+        self.ax_main.set_title(title)
+        if self.colorbar is not None:
+            self.colorbar.remove()
+        self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
+        self.canvas_main.draw()
+        
+    def set_aspect(self, aspect: float):
+        self.ax_main.set_aspect(aspect)
         self.canvas_main.draw()
             
     def on_press(self, event):

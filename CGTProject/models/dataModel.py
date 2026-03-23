@@ -17,9 +17,8 @@ nxsetmemory(80000)  # Set to 80000 MB or higher
 
 class DataModel:
     
-    def __init__(self, dataPaths : tuple[str, list] = ("", [])):
+    def __init__(self):
         # self.dic_temp_to_data : dict[str, NXdata] = {} # Temperature str to nxdata (HKL where H is nxaxes[0], K nxaxes[1], L nxaxes[2])
-        self.dataPathRoot, self.dataMetadata = dataPaths
         self.index = 0
         self.HKLPlane : Optional[HKLPlaneEnum] = None
         

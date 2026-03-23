@@ -3,8 +3,11 @@
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
 from matplotlib.lines import Line2D
+from PyQt5.QtCore import pyqtSignal
+
 
 class PlottedLineModesGraphWidget(PlottedGraphWidget):
+    openDeltaPDFOptionsDialogue = pyqtSignal()  # Signal to indicate Gaussian filter state and sigma value
     def __init__(self, parent=None):
         super().__init__(parent)
         self.lineCutMode : LineCutModeEnum = None
@@ -12,6 +15,7 @@ class PlottedLineModesGraphWidget(PlottedGraphWidget):
         self.initVerticleLineCutTool()
         self.initHorizontalLineCutTool()
         self.initVerticleHorizontalLineCutTool()
+        self.initDeltaPDFTool()
         
     def initVerticleLineCutTool(self):
         """Initialize line cut tool components"""
@@ -30,6 +34,18 @@ class PlottedLineModesGraphWidget(PlottedGraphWidget):
         self.customToolbar.add_vert_horiz_lincut_button()
         self.customToolbar.vertHorizLineCutModeToggled.connect(self.toggleVerticleHorizontalLineCutMode) 
         # self.verticle_horizontal_line_cut_enabled = False
+        
+    def initDeltaPDFTool(self):
+        self.customToolbar.add_deltaPDF_button()
+        self.customToolbar.deltaPDFToggled.connect(self.toggleDeltaPDFMode)
+        
+    def toggleDeltaPDFMode(self, enabled: bool):
+        #open Dialogue
+        if enabled:
+            self.openDeltaPDFOptionsDialogue.emit()
+        else:
+            self.customToolbar.toggle_deltaPDF_mode(False)
+            
         
     def toggleVerticleLineCutMode(self, enabled: bool):
         """Enable or disable line cut mode"""

@@ -15,6 +15,18 @@ from nexusformat.nexus import NXdata, nxsetmemory
 nxsetmemory(80000)  # Set to 80000 MB or higher
 
 class DiffuseDataModel(DataModel):
-    def __init__(self, dataPaths : tuple[str, list] = ("", [])):
+    def __init__(self, dpdf):
         # self.dic_temp_to_data : dict[str, NXdata] = {} # Temperature str to nxdata (HKL where H is nxaxes[0], K nxaxes[1], L nxaxes[2])
-        super().__init__(dataPaths)
+        super().__init__()
+        self.dpdf = dpdf
+        self.HKLPlane = HKLPlaneEnum.H_K_Plane
+        
+    def getCurrentData(self) -> Optional[NXdata]:
+        return self.dpdf.fft #self.dic_temp_to_data.get(self.temperature, None)
+    
+    # self.page_title.setText("Delta PDF Analysis")
+        # plot_slice(dpdf.fft[:,:,0.0]/1e3, cmap='seismic',
+        #    vmin=-5, vmax=5,
+        #    xlim=(-3,3),
+        #    ylim=(-3,3),
+        #   )

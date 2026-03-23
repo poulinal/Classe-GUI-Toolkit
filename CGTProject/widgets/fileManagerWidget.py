@@ -40,7 +40,7 @@ class FileManagerWidget(QWidget):
         self.selectSampleCombo.hide()
         
         useAGeneratedDataset = QPushButton('Use a Generated Dataset')
-        useVacancyGeneratedDataset = QPushButton('Use a Generated Diffuse Scattering Dataset')
+        # useVacancyGeneratedDataset = QPushButton('Use a Generated Diffuse Scattering Dataset')
         
         self.submitButton = QPushButton('Submit')
 
@@ -64,7 +64,7 @@ class FileManagerWidget(QWidget):
         # self.selectHKLPlaneCombo.currentIndexChanged.connect(lambda index: self.hklPlaneChanged.emit(self.selectHKLPlaneCombo.currentText()))
         
         useAGeneratedDataset.clicked.connect(self._onUseAGeneratedDatasetClicked)
-        useVacancyGeneratedDataset.clicked.connect(self._onUseVacancyGeneratedDatasetClicked)
+        # useVacancyGeneratedDataset.clicked.connect(self._onUseVacancyGeneratedDatasetClicked)
         self.submitButton.clicked.connect(self._onSubmitButtonClicked)
         self.submitButton.setEnabled(False)
         
@@ -75,7 +75,7 @@ class FileManagerWidget(QWidget):
         fileManagerLayout.addWidget(self.changeTemperatureCombo)
         fileManagerLayout.addWidget(self.selectHKLPlaneCombo)
         fileManagerLayout.addWidget(useAGeneratedDataset)
-        fileManagerLayout.addWidget(useVacancyGeneratedDataset)
+        # fileManagerLayout.addWidget(useVacancyGeneratedDataset)
         fileManagerLayout.addWidget(self.submitButton)
         self.setLayout(fileManagerLayout)
 
@@ -114,18 +114,18 @@ class FileManagerWidget(QWidget):
         self.submitButton.setEnabled(True)
         # data = load_transform(f'{sample_directory}/cubic_15.nxs')
         
-    def _onUseVacancyGeneratedDatasetClicked(self):
-        """Handle use a generated diffuse scattering dataset button click event"""
-        # Loading an example dataset
-        from nxs_analysis_tools.datasets import vacancies
-        from nxs_analysis_tools.datareduction import load_discus_nxs
+    # def _onUseVacancyGeneratedDatasetClicked(self):
+    #     """Handle use a generated diffuse scattering dataset button click event"""
+    #     # Loading an example dataset
+    #     from nxs_analysis_tools.datasets import vacancies
+    #     from nxs_analysis_tools.datareduction import load_discus_nxs
 
-        data_path = vacancies()
-        sample_directory = os.path.dirname(data_path)
-        print(f"Using generated diffuse scattering dataset at: {data_path}")
-        sample_files = data_path
-        self.pathSelected.emit( (sample_directory, [sample_files]) )
-        self.submitButton.setEnabled(True)
+    #     data_path = vacancies()
+    #     sample_directory = os.path.dirname(data_path)
+    #     print(f"Using generated diffuse scattering dataset at: {data_path}")
+    #     sample_files = data_path
+    #     self.pathSelected.emit( (sample_directory, [sample_files]) )
+    #     self.submitButton.setEnabled(True)
         
     def _onSubmitButtonClicked(self):
         """Handle submit button click event"""
@@ -204,6 +204,7 @@ class FileManagerWidget(QWidget):
             # filter = "Directory (*/nxrefine/)"
         )
         # self.pathSelected.emit(path)
+        print(f"From filedialog we get path: {path}")
         return path
     
     def getFolderDataPath(self):

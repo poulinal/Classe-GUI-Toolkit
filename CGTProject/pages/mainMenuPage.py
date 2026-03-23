@@ -28,7 +28,7 @@ class MainMenu(QWidget):
         # Menu buttons
         self.process_btn = QPushButton("Process Data")
         self.analyze_btn = QPushButton("Analyze Data (Scattering Datasets)")
-        self.deltaPDF_btn = QPushButton("Analyze Data (Diffuse Scattering Data)")
+        # self.deltaPDF_btn = QPushButton("Analyze Data (Diffuse Scattering Data)")
         
         # Style buttons
         button_style = """
@@ -40,11 +40,11 @@ class MainMenu(QWidget):
         """
         self.process_btn.setStyleSheet(button_style)
         self.analyze_btn.setStyleSheet(button_style)
-        self.deltaPDF_btn.setStyleSheet(button_style)
+        # self.deltaPDF_btn.setStyleSheet(button_style)
         
         layout.addWidget(self.process_btn)
         layout.addWidget(self.analyze_btn)
-        layout.addWidget(self.deltaPDF_btn)
+        # layout.addWidget(self.deltaPDF_btn)
         layout.addStretch()
         
         self.setLayout(layout)
@@ -75,6 +75,7 @@ class MainWindow(QMainWindow):
         self.analyze_page = MainAnalysisPage(settings)
         # self.deltapdf_page = DeltaPDFPage(settings)
         self.analyze_page.openExtractedData.connect(lambda extractedData: self.open_line_cut(extractedData))
+        self.analyze_page.openDeltaPDF.connect(lambda dpdf: self.open_delta_pdf(settings, dpdf))
         
         # Create tab widget
         self.analysis_tab_widget = AdvancedTabWidget()
@@ -94,7 +95,7 @@ class MainWindow(QMainWindow):
         # Connect navigation signals
         self.main_menu.process_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(1))
         self.main_menu.analyze_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(2))
-        self.main_menu.deltaPDF_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(3))
+        # self.main_menu.deltaPDF_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(3))
         self.process_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
         self.analyze_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
         # self.deltapdf_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
@@ -129,6 +130,15 @@ class MainWindow(QMainWindow):
         new_linecut_tab = LineCutPage(extractedData)
         
         tab_index = self.analysis_tab_widget.addTab(new_linecut_tab, f"LineCut Tab {self.tab_counter}")
+        
+        self.analysis_tab_widget.setCurrentIndex(tab_index)
+        
+        self.tab_counter += 1
+        
+    def open_delta_pdf(self, settings, dpdf):
+        new_dpdf_tab = DeltaPDFPage(settings, dpdf)
+        
+        tab_index = self.analysis_tab_widget.addTab(new_dpdf_tab, f"DeltaPDF Tab {self.tab_counter}")
         
         self.analysis_tab_widget.setCurrentIndex(tab_index)
         

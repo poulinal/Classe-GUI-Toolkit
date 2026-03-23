@@ -8,6 +8,7 @@ from typing import Optional
 
 from CGTProject.utilities.HKLPlaneEnum import HKLPlaneEnum
 from CGTProject.models.dataModel import DataModel
+import os
 
 # # Increase NX_MEMORY limit to handle large datasets (in MB)
 # os.environ['NX_MEMORY'] = '8000'
@@ -17,9 +18,10 @@ nxsetmemory(80000)  # Set to 80000 MB or higher
 class TemperatureDataModel(DataModel):
     
     def __init__(self, dataPaths : tuple[str, list] = ("", [])):
+        self.dataPathRoot, self.dataMetadata = dataPaths
         self.dic_temp_to_data : dict[str, NXdata] = {} # Temperature str to nxdata (HKL where H is nxaxes[0], K nxaxes[1], L nxaxes[2])
         self.temperature : str = ""
-        super().__init__(dataPaths)
+        super().__init__()
         
         
     def setData(self, data):
@@ -36,8 +38,36 @@ class TemperatureDataModel(DataModel):
         print(f"Setting temperature to: {temperatureValue}")
         if temperatureValue in self.getTemperatureValues():
             self.temperature = temperatureValue
+            metadata_path = self.build_metadata_path(temperatureValue)
+            if metadata_path:
+                self.temperature = temperatureValue
+                print(f"Loading data for temperature: {temperatureValue} from metadata file: {metadata_path}")
+                self.dic_temp_to_data[temperatureValue] = load_transform(metadata_path) #TODO may need to get rid of load everything onto dic, instead one by one since too heavy
+            else:
+                print(f"Temperature value {temperatureValue} not found in available values.")
         else:
             print(f"Temperature value {temperatureValue} not found in available values.")
+            
+    def build_metadata_path(self, temperatureValue: str) -> Optional[str]:
+        """Find the metadata filename/path that corresponds to temperatureValue.
+        Returns full path (joined with dataPathRoot if metadata entries are filenames) or None.
+        """
+        if not self.dataMetadata:
+            return None
+        # First try exact match by extracting temp token same as initializeAllData
+        for metadata in self.dataMetadata:
+            try:
+                temp_value = metadata.split('_')[-1].split('.nxs')[0]
+            except Exception:
+                temp_value = None
+            if temp_value == temperatureValue:
+                return metadata if os.path.isabs(metadata) else os.path.join(self.dataPathRoot, metadata)
+        # Fallback: look for filename that contains the temperature string or ends with "<temp>.nxs"
+        for metadata in self.dataMetadata:
+            name = os.path.basename(metadata)
+            if name.endswith(f"{temperatureValue}.nxs") or temperatureValue in name:
+                return metadata if os.path.isabs(metadata) else os.path.join(self.dataPathRoot, metadata)
+        return None
             
     def getCurrentData(self) -> Optional[NXdata]:
         return self.dic_temp_to_data.get(self.temperature, None)
@@ -49,10 +79,11 @@ class TemperatureDataModel(DataModel):
         for metadata in self.dataMetadata:
             #temperature is between the _ and .nxs
             temp_value = metadata.split('_')[-1].split('.nxs')[0]
-            print(f"Loading data for temperature: {temp_value} from metadata file: {metadata}")
-            self.dic_temp_to_data[temp_value] = load_transform(metadata)
+            # print(f"Loading data for temperature: {temp_value} from metadata file: {metadata}")
+            # self.dic_temp_to_data[temp_value] = load_transform(metadata) #dont load data too heavy
+            self.dic_temp_to_data[temp_value] = True
             
-            print(f"zmax: {self.dic_temp_to_data[temp_value].nxaxes[0].max()}, shape: {self.dic_temp_to_data[temp_value].nxsignal.shape}") if self.dic_temp_to_data[temp_value] else print("No data loaded for this temperature.")
+            # print(f"zmax: {self.dic_temp_to_data[temp_value].nxaxes[0].max()}, shape: {self.dic_temp_to_data[temp_value].nxsignal.shape}") if self.dic_temp_to_data[temp_value] else print("No data loaded for this temperature.")
             
     
     def applyLineCutOptions(self, line_cut_options: dict[str, float], coords: tuple[float, float], verticle: bool):

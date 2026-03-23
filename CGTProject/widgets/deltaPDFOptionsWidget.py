@@ -37,7 +37,7 @@ import numpy as np
 
 from nxs_analysis_tools.pairdistribution import DeltaPDF
 
-class DeltaPDFOptionsWidget(QWidget):
+class DeltaPDFOptionsWidget(QDialogue):
     generateDeltaPDF = pyqtSignal(dict)  # Signal to indicate Gaussian filter state and sigma value
     
     def __init__(self):

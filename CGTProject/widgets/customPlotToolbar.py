@@ -14,6 +14,7 @@ class CustomPlotToolbar(NavigationToolbar):
     horizLineCutModeToggled = pyqtSignal(bool)
     vertHorizLineCutModeToggled = pyqtSignal(bool)
     boxCutModeToggled = pyqtSignal(bool)
+    deltaPDFToggled = pyqtSignal(bool)
     resetButtonClicked = pyqtSignal()
     exportData = pyqtSignal()
     
@@ -109,6 +110,14 @@ class CustomPlotToolbar(NavigationToolbar):
         self.addAction(reset_action)
         self.addSeparator()
         
+    def add_deltaPDF_button(self):
+        """Add Delta PDF button to the toolbar"""
+        self.deltaPDF_action = QAction("Delta PDF", self)
+        self.deltaPDF_action.setToolTip("Generate Delta PDF")
+        self.deltaPDF_action.setCheckable(True)
+        self.deltaPDF_action.triggered.connect(self.toggle_deltaPDF_mode)
+        self.addAction(self.deltaPDF_action)
+        
     def reset_plot(self):
         """Reset plot to original state"""
         # self.canvas.reset_plot()
@@ -165,3 +174,9 @@ class CustomPlotToolbar(NavigationToolbar):
     def toggle_vert_horiz_line_cut_mode(self, checked):
         self.vertHorizLinCutAction.setChecked(checked)
         self.vertHorizLineCutModeToggled.emit(checked)
+        
+    def toggle_deltaPDF_mode(self, checked):
+        # print(f"toggle_deltaPDF_mode: {checked}")
+        self.deltaPDF_action.setChecked(checked)
+        if checked:
+            self.deltaPDFToggled.emit(checked)

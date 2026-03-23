@@ -4,31 +4,23 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 from CGTProject.pages.mainAnalysisPage import MainAnalysisPage
 from CGTProject.models.diffuseScatteringModel import DiffuseDataModel
+from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
+
+from CGTProject.utilities.HKLPlaneEnum import HKLPlaneEnum
 
 class DeltaPDFPage(MainAnalysisPage):
-    def __init__(self, settings):
+    def __init__(self, settings, dpdf):
+        self.dpdf = dpdf
         super().__init__(settings)
-        # self.page_title.setText("Delta PDF Analysis")
+        self.HKLPlane = HKLPlaneEnum.H_K_Plane
+        # self.plotted_graph_widget = PlottedGraphWidget()
+        
+        self.dataModel.setIndex(self.plotSliderWidget.value())
+        self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
+        self.plotSliderWidget.setEnabled(True)
+        
+        self.redrawPlot()
+        
+    def setupDataModel(self):
+        self.dataModel : DiffuseDataModel = DiffuseDataModel(self.dpdf) # Placeholder for DiffuseDataModel instance
     
-    def loadData(self, filePathTuple : tuple[str, list]):
-        # Placeholder for data loading logic
-        print(f"Loading data from: {filePathTuple[0]}")
-        # data : NXdata = load_transform(filePathTuple[0])
-        self.diffuseDataModel = DiffuseDataModel(filePathTuple)
-        
-    #     self.classeDataModel.setIndex(self.plotSliderWidget.value())
-        
-    #     self.file_manager_widget.populateTemperatureCombo(self.classeDataModel.getTemperatureValues())
-    #     self.file_manager_widget.setFileOptionsEnabled(True)
-        
-    # def onFileOptionsComboChanged(self):
-    #     print(f"Temperature combo changed: {self.file_manager_widget.getTemperatureComboValue()}")
-    #     # self.classeDataModel.setTemperature(self.file_manager_widget.getTemperatureComboValue())
-    #     self.classeDataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
-        
-    #     self.plotSliderWidget.setMaximum(self.classeDataModel.getMaxDepth())
-    #     self.plotSliderWidget.setEnabled(True)
-        
-    #     # self.preLoadPlotsOption.setEnabled(True)
-        
-    #     self.redrawPlot()
