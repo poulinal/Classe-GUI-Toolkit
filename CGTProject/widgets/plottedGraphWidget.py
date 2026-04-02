@@ -23,6 +23,10 @@ class PlottedGraphWidget(QWidget):
         
         self.quadmesh = None
         self.colorbar = None  # Track colorbar
+
+        # Track mesh characteristics for fast updates.
+        self._mesh_kind = None
+        self._mesh_shape = None
         
         self.mouse_dragging = False
         
@@ -97,9 +101,31 @@ class PlottedGraphWidget(QWidget):
             except Exception:
                 pass
             self.cax.set_visible(False)
+
+    @staticmethod
+    def _centers_to_edges(centers: np.ndarray) -> np.ndarray:
+        """Convert 1D bin centers to bin edges (length N+1)."""
+
+        centers = np.asarray(centers, dtype=float)
+        if centers.size == 0:
+            return centers
+        if centers.size == 1:
+            c0 = float(centers[0])
+            return np.array([c0 - 0.5, c0 + 0.5], dtype=float)
+
+        mids = (centers[1:] + centers[:-1]) * 0.5
+        first = centers[0] - (mids[0] - centers[0])
+        last = centers[-1] + (centers[-1] - mids[-1])
+        return np.concatenate([[first], mids, [last]])
         
     
-    def updateQuadMeshPlot(self, dataQuadMesh : QuadMesh = None, dataTuple : tuple[np.ndarray, np.ndarray, np.ndarray] = None):
+    def updateQuadMeshPlot(
+        self,
+        dataQuadMesh: QuadMesh = None,
+        dataTuple: tuple[np.ndarray, np.ndarray, np.ndarray] = None,
+        *,
+        autoscale: bool = True,
+    ):
         # Allow callers to pass (X, Y, Z) positionally by accident.
         if dataTuple is None and isinstance(dataQuadMesh, tuple) and len(dataQuadMesh) == 3:
             dataTuple = dataQuadMesh
@@ -116,15 +142,24 @@ class PlottedGraphWidget(QWidget):
         Y = np.asarray(Y)
         Z = np.asarray(Z)
 
+        is_1d_grid = (
+            X.ndim == 1
+            and Y.ndim == 1
+            and Z.ndim == 2
+            and Z.shape == (Y.size, X.size)
+        )
+
         # Fast path: reuse existing QuadMesh by updating its array.
         if self.quadmesh is not None:
             try:
-                self.quadmesh.set_array(np.ravel(Z))
-                self.quadmesh.autoscale()
-                if self.colorbar is not None:
-                    self.colorbar.update_normal(self.quadmesh)
-                self.canvas_main.draw_idle()
-                return
+                if self._mesh_shape == Z.shape:
+                    self.quadmesh.set_array(np.ravel(Z))
+                    if autoscale:
+                        self.quadmesh.autoscale()
+                        if self.colorbar is not None:
+                            self.colorbar.update_normal(self.quadmesh)
+                    self.canvas_main.draw_idle()
+                    return
             except Exception:
                 # Fallback to full redraw below (e.g., size mismatch).
                 pass
@@ -137,9 +172,26 @@ class PlottedGraphWidget(QWidget):
             except Exception:
                 pass
             self.quadmesh = None
+        self._mesh_kind = None
+        self._mesh_shape = None
         self._reset_colorbar()
 
-        self.quadmesh = self.ax_main.pcolormesh(X, Y, Z, shading='auto')
+        if is_1d_grid:
+            x_edges = self._centers_to_edges(X)
+            y_edges = self._centers_to_edges(Y)
+            self.quadmesh = self.ax_main.pcolormesh(x_edges, y_edges, Z, shading='flat')
+            self._mesh_kind = 'flat_1d'
+            self._mesh_shape = Z.shape
+        else:
+            self.quadmesh = self.ax_main.pcolormesh(X, Y, Z, shading='auto')
+            self._mesh_kind = 'auto'
+            self._mesh_shape = Z.shape
+
+        if autoscale:
+            try:
+                self.quadmesh.autoscale()
+            except Exception:
+                pass
         # Draw colorbar into the dedicated axes so we keep tight margins.
         if getattr(self, "cax", None) is not None:
             self.cax.set_visible(True)

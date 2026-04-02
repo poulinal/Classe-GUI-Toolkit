@@ -130,12 +130,14 @@ class MainAnalysisPage(IAnalysisPage):
             quad_mesh_data = self.dataModel.getQuadMeshAtCurrentIndex()
             if quad_mesh_data:
                 # print(f"quadmeshdata: {quad_mesh_data}")
+                autoscale = bool(getattr(self, "_autoscale_next_redraw", True))
+                self._autoscale_next_redraw = True
                 if isinstance(self.dataModel, TemperatureDaskDataModel):
                     print("Data model is TemperatureDaskDataModel, updating plot with new quad mesh data")
-                    self.plotted_graph_widget.updateQuadMeshPlot(dataTuple=quad_mesh_data)
+                    self.plotted_graph_widget.updateQuadMeshPlot(dataTuple=quad_mesh_data, autoscale=autoscale)
                 elif isinstance(self.dataModel, TemperatureDataModel):
                     print("Data model is TemperatureDataModel, updating plot with new quad mesh data")
-                    self.plotted_graph_widget.updateQuadMeshPlot(dataQuadMesh=quad_mesh_data)
+                    self.plotted_graph_widget.updateQuadMeshPlot(dataQuadMesh=quad_mesh_data, autoscale=autoscale)
             
                 
     def onSubmitLineCut(self, verticle : bool):

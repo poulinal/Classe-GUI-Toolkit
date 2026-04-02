@@ -29,6 +29,9 @@ class IAnalysisPage(QWidget):
         self._plot_update_timer = QTimer(self)
         self._plot_update_timer.setSingleShot(True)
         self._plot_update_timer.timeout.connect(self._applyPendingPlotSliderValue)
+
+        # When dragging the slider, avoid expensive autoscale on every frame.
+        self._autoscale_next_redraw: bool = True
         
         self.layout = QGridLayout()
         
@@ -57,7 +60,7 @@ class IAnalysisPage(QWidget):
         self.plotSliderWidget.setTickInterval(1)
         self.plotSliderWidget.setEnabled(False)
         self.plotSliderWidget.valueChanged.connect(self.onPlotSliderValueChanged)
-        self.plotSliderWidget.sliderReleased.connect(self._applyPendingPlotSliderValue)
+        self.plotSliderWidget.sliderReleased.connect(self._onPlotSliderReleased)
         self.layout.addWidget(self.plotSliderWidget, 4, 0, 1, 2)
 
         self.additionalOptionsCombo = QComboBox()
@@ -75,13 +78,21 @@ class IAnalysisPage(QWidget):
         if self.dataModel:
             quad_mesh_data = self.dataModel.getQuadMeshAtCurrentIndex()
             if quad_mesh_data:
-                self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data)
+                autoscale = bool(getattr(self, "_autoscale_next_redraw", True))
+                self._autoscale_next_redraw = True
+                self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data, autoscale=autoscale)
       
     def onPlotSliderValueChanged(self, value):
         # Debounce rapid slider movement; keep UI responsive.
         self._pending_plot_slider_value = int(value)
+        self._autoscale_next_redraw = False
         # Restart timer to coalesce events during dragging.
-        self._plot_update_timer.start(30)
+        self._plot_update_timer.start(100)
+
+    def _onPlotSliderReleased(self):
+        # Force a final redraw with autoscale once the user lets go.
+        self._autoscale_next_redraw = True
+        self._applyPendingPlotSliderValue()
 
     def _applyPendingPlotSliderValue(self):
         if self._pending_plot_slider_value is None or not self.dataModel:

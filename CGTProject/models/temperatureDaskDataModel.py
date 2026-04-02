@@ -90,6 +90,9 @@ class TemperatureDaskDataModel(DataModel):
         self._nx_cache: Dict[str, NXdata] = {}
         self._max_loaded_items = 1
 
+        # Cache 1D axis arrays (Qh/Qk/Ql) as NumPy for faster plotting.
+        self._axis_numpy_cache: Dict[str, np.ndarray] = {}
+
         super().__init__()
 
     def initializeAllData(self):
@@ -173,14 +176,23 @@ class TemperatureDaskDataModel(DataModel):
             print("Unsupported HKL plane.")
             return None
 
-        # Convert NXfield axes -> NumPy arrays (Matplotlib cannot handle NXfield/generator inputs)
-        def _axis_to_numpy(a):
-            if isinstance(a, NXfield):
-                return np.asarray(a[:])  # forces only this 1D axis into memory
-            return np.asarray(a)
+        # Convert NXfield axes -> NumPy arrays, but cache them so slider updates
+        # don't re-read axis vectors from disk.
+        def _axis_to_numpy_cached(a):
+            if not isinstance(a, NXfield):
+                return np.asarray(a)
 
-        x_np = _axis_to_numpy(x)
-        y_np = _axis_to_numpy(y)
+            name = getattr(a, "nxname", None) or "axis"
+            cached = self._axis_numpy_cache.get(str(name))
+            if cached is not None:
+                return cached
+
+            arr = np.asarray(a[:])  # forces only this 1D axis into memory
+            self._axis_numpy_cache[str(name)] = arr
+            return arr
+
+        x_np = _axis_to_numpy_cached(x)
+        y_np = _axis_to_numpy_cached(y)
 
         # Ensure C is a NumPy array; plane2d is already just a 2D slice (small compared to 3D)
         C = np.asarray(plane2d).T  # pcolormesh expects (len(y), len(x)) for 1D x/y
@@ -268,6 +280,9 @@ class TemperatureDaskDataModel(DataModel):
 
             # Load the simplified standalone NXdata directly.
             self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+
+            # New dataset loaded: clear any cached axis arrays.
+            self._axis_numpy_cache.clear()
             
             
             self._evict_if_needed()
