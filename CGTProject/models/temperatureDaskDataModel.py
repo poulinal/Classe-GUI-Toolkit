@@ -8,11 +8,14 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import dask.array as da
-from nexusformat.nexus import NXdata, NXfield
+from nexusformat.nexus import NXdata, NXfield, nxload
+from nxs_analysis_tools import Scissors
 
 from nxs_analysis_tools.datareduction import load_transform
+from CGTProject.utilities.nxs_fast import load_transform_fast, save_transform_npy, load_transform_npy, save_transform_standalone_nxs
 
 from matplotlib.collections import QuadMesh
+from CGTProject.utilities.HKLPlaneEnum import HKLPlaneEnum
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -108,14 +111,67 @@ class TemperatureDaskDataModel(DataModel):
         self,
         ax=None,
         **pcolormesh_kwargs,
-    ) -> Optional[QuadMesh]:
-        # ...existing code...
+    ) -> Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        """
+        Return a Matplotlib QuadMesh for the current HKL plane at the current index,
+        without using plot_slice().
+
+        Notes:
+        - Uses lazy NXfield slicing, so only a 2D plane is read.
+        - By default draws into the current axes (plt.gca()) unless ax is provided.
+        - pcolormesh expects array shaped (len(y), len(x)), so we transpose the slice.
+        """
+        if self.HKLPlane is None:
+            print("HKL Plane not set.")
+            return None
+
+        if not self.dataIsValid():
+            print("No data available or temperature not found.")
+            return None
+
+        if ax is None:
+            ax = plt.gca()
 
         view = self.getView()
         sig = view.signal
         axes = view.axes
 
-        # ...existing code selecting x, y, plane2d ...
+        axisToSlice = self.getSliceAxisIndex()
+        if axisToSlice < 0 or axisToSlice >= len(axes):
+            print("Invalid slice axis index.")
+            return None
+
+        z_axis_values = axes[axisToSlice]
+        if self.index < 0 or self.index >= len(z_axis_values):
+            print("Index out of range.")
+            return None
+
+        # actual_value = z_axis_values[self.index]
+        # print(
+        #     f"Getting QuadMesh at index: {self.index}, "
+        #     f"actual z value: {actual_value}"
+        # )
+
+        # Build x/y coordinates and extract the 2D plane.
+        # data slice shapes:
+        #  - HK: (H, K) from sig[:, :, idx]
+        #  - HL: (H, L) from sig[:, idx, :]
+        #  - KL: (K, L) from sig[idx, :, :]
+        if self.HKLPlane == HKLPlaneEnum.H_K_Plane:
+            x = axes[0]  # Qh
+            y = axes[1]  # Qk
+            plane2d = sig[:, :, self.index]
+        elif self.HKLPlane == HKLPlaneEnum.H_L_Plane:
+            x = axes[0]  # Qh
+            y = axes[2]  # Ql
+            plane2d = sig[:, self.index, :]
+        elif self.HKLPlane == HKLPlaneEnum.K_L_Plane:
+            x = axes[1]  # Qk
+            y = axes[2]  # Ql
+            plane2d = sig[self.index, :, :]
+        else:
+            print("Unsupported HKL plane.")
+            return None
 
         # Convert NXfield axes -> NumPy arrays (Matplotlib cannot handle NXfield/generator inputs)
         def _axis_to_numpy(a):
@@ -129,21 +185,12 @@ class TemperatureDaskDataModel(DataModel):
         # Ensure C is a NumPy array; plane2d is already just a 2D slice (small compared to 3D)
         C = np.asarray(plane2d).T  # pcolormesh expects (len(y), len(x)) for 1D x/y
 
-        if "shading" not in pcolormesh_kwargs:
-            pcolormesh_kwargs["shading"] = "auto"
+        # if "shading" not in pcolormesh_kwargs:
+        #     pcolormesh_kwargs["shading"] = "auto"
 
-        mesh = ax.pcolormesh(x_np, y_np, C, **pcolormesh_kwargs)
-        return mesh
-
-        # pcolormesh expects C shaped (len(y), len(x)) when x,y are 1D
-        C = plane2d.T
-
-        # defaults (caller can override via **pcolormesh_kwargs)
-        if "shading" not in pcolormesh_kwargs:
-            pcolormesh_kwargs["shading"] = "auto"
-
-        mesh = ax.pcolormesh(x, y, C, **pcolormesh_kwargs)
-        return mesh
+        # mesh = ax.pcolormesh(x_np, y_np, C, **pcolormesh_kwargs)
+        # print(f"Prepared QuadMesh data with shapes x: {x_np.shape}, y: {y_np.shape}, C: {C.shape}")
+        return (x_np, y_np, C)
 
     def build_metadata_path(self, temperatureValue: str) -> Optional[str]:
         # Prefer index if initializeAllData() was called
@@ -195,7 +242,37 @@ class TemperatureDaskDataModel(DataModel):
             # IMPORTANT:
             # This should ideally return NXdata whose NXfield remains HDF5-backed.
             # Avoid calling nxsignal.nxvalue/nxdata anywhere unless you want the full array.
-            self._nx_cache[temperatureValue] = load_transform(metadata_path)
+            
+            # fast_standalone_nxs_path = os.path.join(os.path.dirname(metadata_path), f"fast_{os.path.basename(metadata_path)}")
+            # if os.path.exists(fast_standalone_nxs_path):
+            #     print(f"Loading from fast standalone .nxs: {fast_standalone_nxs_path}")
+            #     self._nx_cache[temperatureValue] = load_transform_fast(fast_standalone_nxs_path)
+            # else:
+            #     self._nx_cache[temperatureValue] = load_transform_fast(metadata_path)
+            # # self._nx_cache[temperatureValue] = load_transform_npy('/home/apoulin/de-lat-to-4431-b_link/nxrefine/Eu5Sn2As6/sample1/Eu5Sn2As6_300_hkl.npy')
+            # # save_transform_npy(metadata_path)
+            #     save_transform_standalone_nxs(metadata_path)
+            if metadata_path.lower().endswith(".nxs"):
+                fast_standalone_nxs_path = metadata_path[:-4] + "_standalone_hkl.nxs"
+            else:
+                fast_standalone_nxs_path = metadata_path + "_standalone_hkl.nxs"
+
+            if not os.path.exists(fast_standalone_nxs_path):
+                # Materialize a standalone file (no NXlink/external-file dependencies) in HKL order.
+                save_transform_standalone_nxs(
+                    metadata_path,
+                    out_path=fast_standalone_nxs_path,
+                    order="hkl",
+                    overwrite=False,
+                )
+
+            # Load the simplified standalone NXdata directly.
+            self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+            
+            
+            self._evict_if_needed()
+            
+            
             self._evict_if_needed()
 
     def getCurrentData(self) -> Optional[NXdata]:
@@ -229,3 +306,58 @@ class TemperatureDaskDataModel(DataModel):
         Reads a small 3D block into a NumPy array (only that window is read from disk).
         """
         return self.getView().window(h, k, l)
+    
+    def applyLineCutOptions(self, line_cut_options: dict[str, float], coords: tuple[float, float], verticle: bool):
+        # Placeholder for applying line cut options to the data model
+        print(f"Applying line cut options: {line_cut_options} at coords: {coords} verticle: {verticle}")
+        scissors = Scissors()
+        scissors.set_data(self._nx_cache[self.temperature])
+        if line_cut_options and self.temperature in self._nx_cache:
+            if self.HKLPlane is None:
+                print("HKL Plane not set. Cannot apply line cut options.")
+                return
+            elif self.HKLPlane == HKLPlaneEnum.H_K_Plane:
+                hMin = line_cut_options.get('h_min', 0.0)
+                hMax = line_cut_options.get('h_max', 0.0)
+                kMin = line_cut_options.get('k_min', 0.0)
+                kMax = line_cut_options.get('k_max', 0.0)
+                lCenter = line_cut_options.get('l_center', 0.0)
+                deltaL = line_cut_options.get('delta_l', 0.0)
+                h_half = (hMax - hMin) / 2
+                k_half = (kMax - kMin) / 2
+                l_half = deltaL / 2
+                scissors.set_center((coords[0], coords[1], lCenter))  # Assuming the line cut is in the H-K plane for simplicity
+                scissors.set_window((h_half, k_half, l_half))
+            elif self.HKLPlane == HKLPlaneEnum.H_L_Plane:
+                hMin = line_cut_options.get('h_min', 0.0)
+                hMax = line_cut_options.get('h_max', 0.0)
+                lMin = line_cut_options.get('l_min', 0.0)
+                lMax = line_cut_options.get('l_max', 0.0)
+                kCenter = line_cut_options.get('k_center', 0.0)
+                deltaK = line_cut_options.get('delta_k', 0.0)
+                h_half = (hMax - hMin) / 2
+                l_half = (lMax - lMin) / 2
+                k_half = deltaK / 2
+                scissors.set_center((coords[0], kCenter, coords[1]))  # Assuming the line cut is in the H-L plane for simplicity
+                scissors.set_window((h_half, k_half, l_half))  # Example window, adjust as needed
+            elif self.HKLPlane == HKLPlaneEnum.K_L_Plane:
+                kMin = line_cut_options.get('k_min', 0.0)
+                kMax = line_cut_options.get('k_max', 0.0)
+                lMin = line_cut_options.get('l_min', 0.0)
+                lMax = line_cut_options.get('l_max', 0.0)
+                hCenter = line_cut_options.get('h_center', 0.0)
+                deltaH = line_cut_options.get('delta_h', 0.0)
+                k_half = (kMax - kMin) / 2
+                l_half = (lMax - lMin) / 2
+                h_half = deltaH / 2
+                scissors.set_center((hCenter, coords[0], coords[1]))  # Assuming the line cut is in the K-L plane for simplicity
+                scissors.set_window((h_half, k_half, l_half))  # Example window, adjust as needed
+                
+        # scissors.set_center((coords[0], coords[1], 0))  # Assuming the line cut is in the H-K plane for simplicity
+        # scissors.set_window((hMin, hMax, kMin, kMax, lCenter - deltaL, lCenter + deltaL))  # Example window, adjust as needed
+        # scissors.set_center((0, 0, 0)) # Placeholder center, adjust based on HKL plane and coords
+        # scissors.set_window((0.1, 1, 0.2)) # Placeholder window, adjust based on HKL plane and line cut options
+        extracted_data = scissors.cut_data()
+        
+        #and include graph options like cmap, vmin vmax colorramp, skewangle
+        return extracted_data

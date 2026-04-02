@@ -28,8 +28,8 @@ class MainAnalysisPage(IAnalysisPage):
         
         
     def setupDataModel(self):
-        self.dataModel : TemperatureDataModel = None # Placeholder for temperatureDataModel instance
-        # self.dataModel : TemperatureDaskDataModel = None # Placeholder for temperatureDataModel instance
+        # self.dataModel : TemperatureDataModel = None # Placeholder for temperatureDataModel instance
+        self.dataModel : TemperatureDaskDataModel = None # Placeholder for temperatureDataModel instance
         
     def initAdditionalUI(self):
     
@@ -82,8 +82,9 @@ class MainAnalysisPage(IAnalysisPage):
         # Placeholder for temperature loading logic
         print(f"Loading temperature info from: {filePathTuple[0]}")
         # data : NXdata = load_transform(filePathTuple[0])
-        self.dataModel = TemperatureDataModel(filePathTuple)
-        # self.dataModel = TemperatureDaskDataModel(filePathTuple)
+        
+        # self.dataModel = TemperatureDataModel(filePathTuple)
+        self.dataModel = TemperatureDaskDataModel(filePathTuple)
         self.dataModel.setIndex(self.plotSliderWidget.value())
         
         self.file_manager_widget.populateTemperatureCombo(self.dataModel.getTemperatureValues())
@@ -128,8 +129,13 @@ class MainAnalysisPage(IAnalysisPage):
         if self.dataModel:
             quad_mesh_data = self.dataModel.getQuadMeshAtCurrentIndex()
             if quad_mesh_data:
-                print(f"quadmeshdata: {quad_mesh_data}")
-                self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data)
+                # print(f"quadmeshdata: {quad_mesh_data}")
+                if isinstance(self.dataModel, TemperatureDaskDataModel):
+                    print("Data model is TemperatureDaskDataModel, updating plot with new quad mesh data")
+                    self.plotted_graph_widget.updateQuadMeshPlot(dataTuple=quad_mesh_data)
+                elif isinstance(self.dataModel, TemperatureDataModel):
+                    print("Data model is TemperatureDataModel, updating plot with new quad mesh data")
+                    self.plotted_graph_widget.updateQuadMeshPlot(dataQuadMesh=quad_mesh_data)
             
                 
     def onSubmitLineCut(self, verticle : bool):

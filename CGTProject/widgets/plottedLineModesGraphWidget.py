@@ -135,7 +135,7 @@ class PlottedLineModesGraphWidget(PlottedGraphWidget):
         
         x0, y0 = self.mouse_point
         
-        print(f"Updating line display at point: ({x0}, {y0})")
+        # print(f"Updating line display at point: ({x0}, {y0})")
         
         if self.lineCutMode == LineCutModeEnum.VERTICAL:
             x_vals = [x0, x0]

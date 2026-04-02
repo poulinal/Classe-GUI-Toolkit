@@ -8,6 +8,7 @@ from matplotlib.collections import QuadMesh
 from matplotlib.lines import Line2D
 import numpy as np
 from scipy.ndimage import map_coordinates
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from CGTProject.widgets.customPlotToolbar import CustomPlotToolbar
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
@@ -48,6 +49,16 @@ class PlottedGraphWidget(QWidget):
         self.canvas_main.updateGeometry()
         self.canvas_main.setMinimumHeight(300)
         self.ax_main = self.fig_main.add_subplot(111)
+
+        # Tighten margins so the plot fills the widget, but keep a bit of breathing room
+        # so y-axis and colorbar tick labels don't get clipped.
+        # We'll reserve a small strip for the colorbar via an appended axes (cax).
+        self.fig_main.subplots_adjust(left=0.06, right=0.98, bottom=0.06, top=0.98)
+
+        # Dedicated colorbar axes placed adjacent to the main axes.
+        self._cbar_divider = make_axes_locatable(self.ax_main)
+        self.cax = self._cbar_divider.append_axes("right", size="4.0%", pad=0.06)
+        self.cax.set_visible(False)
         
         self.fig_profile = Figure(figsize=(8, 3))
         self.canvas_profile = FigureCanvas(self.fig_profile)
@@ -71,26 +82,77 @@ class PlottedGraphWidget(QWidget):
         self.setLayout(layout)
         # Make the widget expand when placed in layouts
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def _reset_colorbar(self):
+        if self.colorbar is not None:
+            try:
+                self.colorbar.remove()
+            except Exception:
+                pass
+            self.colorbar = None
+
+        if getattr(self, "cax", None) is not None:
+            try:
+                self.cax.cla()
+            except Exception:
+                pass
+            self.cax.set_visible(False)
         
     
-    def updateQuadMeshPlot(self, dataQuadMesh : QuadMesh):
+    def updateQuadMeshPlot(self, dataQuadMesh : QuadMesh = None, dataTuple : tuple[np.ndarray, np.ndarray, np.ndarray] = None):
+        # Allow callers to pass (X, Y, Z) positionally by accident.
+        if dataTuple is None and isinstance(dataQuadMesh, tuple) and len(dataQuadMesh) == 3:
+            dataTuple = dataQuadMesh
+            dataQuadMesh = None
+
         if dataQuadMesh is not None:
             X, Y, Z = extract_quadmesh_data(dataQuadMesh)
-            # Remove old colorbar if it exists
-            if self.colorbar is not None:
-                print(self.colorbar)
-                self.colorbar.remove()
-                self.colorbar = None
-            self.quadmesh = self.ax_main.pcolormesh(X, Y, Z, shading='auto')
-            self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
-            self.canvas_main.draw()
+        elif dataTuple is not None:
+            X, Y, Z = dataTuple
         else:
-            print("WARNING... dataQuadMesh is None, cannot updateQuadMeshPlot")
+            return
+
+        X = np.asarray(X)
+        Y = np.asarray(Y)
+        Z = np.asarray(Z)
+
+        # Fast path: reuse existing QuadMesh by updating its array.
+        if self.quadmesh is not None:
+            try:
+                self.quadmesh.set_array(np.ravel(Z))
+                self.quadmesh.autoscale()
+                if self.colorbar is not None:
+                    self.colorbar.update_normal(self.quadmesh)
+                self.canvas_main.draw_idle()
+                return
+            except Exception:
+                # Fallback to full redraw below (e.g., size mismatch).
+                pass
+
+        # Slow path: recreate mesh (e.g. first plot, shape mismatch, or incompatible shading).
+        # Important: do NOT clear the axes; this would also clear line overlays.
+        if self.quadmesh is not None:
+            try:
+                self.quadmesh.remove()
+            except Exception:
+                pass
+            self.quadmesh = None
+        self._reset_colorbar()
+
+        self.quadmesh = self.ax_main.pcolormesh(X, Y, Z, shading='auto')
+        # Draw colorbar into the dedicated axes so we keep tight margins.
+        if getattr(self, "cax", None) is not None:
+            self.cax.set_visible(True)
+            self.colorbar = self.fig_main.colorbar(self.quadmesh, cax=self.cax)
+        else:
+            self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
+        self.canvas_main.draw_idle()
             
     def updateNXDataPlot(self, extractedData : NXdata):
         x_data, y_data = extractNDArrayFromNXdata(extractedData)
         print(f"Plotting line cut with x_data: {x_data}, y_data: {y_data}, with lengths x: {len(x_data)}, y: {len(y_data)}")
 
+        self._reset_colorbar()
         self.ax_main.clear()
         self.ax_main.plot(x_data, y_data)
         self.ax_main.set_xlabel(nxlabel(extractedData.nxaxes[0]))
@@ -101,6 +163,7 @@ class PlottedGraphWidget(QWidget):
         
     def updateXYPlot(self, x_data : np.ndarray, y_data : np.ndarray, xlabel: str = "X", ylabel: str = "Y", title: str = "XY Plot", marker: str = 'o', label: str = None, linestyle: str = None, holdprevious:bool = False):
         if not holdprevious:
+            self._reset_colorbar()
             self.ax_main.clear()
         self.ax_main.plot(x_data, y_data, marker=marker, label=label, linestyle=linestyle)
         self.ax_main.set_xlabel(xlabel)
@@ -115,9 +178,12 @@ class PlottedGraphWidget(QWidget):
         self.ax_main.set_xlabel(xlabel)
         self.ax_main.set_ylabel(ylabel)
         self.ax_main.set_title(title)
-        if self.colorbar is not None:
-            self.colorbar.remove()
-        self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
+        self._reset_colorbar()
+        if getattr(self, "cax", None) is not None:
+            self.cax.set_visible(True)
+            self.colorbar = self.fig_main.colorbar(self.quadmesh, cax=self.cax)
+        else:
+            self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
         self.canvas_main.draw()
         
     def set_aspect(self, aspect: float):

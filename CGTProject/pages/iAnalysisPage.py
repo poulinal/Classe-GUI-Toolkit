@@ -1,6 +1,6 @@
 # AP 2026
 from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout
-from PyQt5.QtCore import Qt, QSettings, pyqtSignal
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QTimer
 
 from abc import abstractmethod
 
@@ -23,6 +23,12 @@ class IAnalysisPage(QWidget):
         self.settings = settings
         # Load last directory
         self.last_directory = self.settings.value('lastDirectory', '')
+
+        # Coalesce rapid slider events so we don't re-render on every tick.
+        self._pending_plot_slider_value: int | None = None
+        self._plot_update_timer = QTimer(self)
+        self._plot_update_timer.setSingleShot(True)
+        self._plot_update_timer.timeout.connect(self._applyPendingPlotSliderValue)
         
         self.layout = QGridLayout()
         
@@ -51,6 +57,7 @@ class IAnalysisPage(QWidget):
         self.plotSliderWidget.setTickInterval(1)
         self.plotSliderWidget.setEnabled(False)
         self.plotSliderWidget.valueChanged.connect(self.onPlotSliderValueChanged)
+        self.plotSliderWidget.sliderReleased.connect(self._applyPendingPlotSliderValue)
         self.layout.addWidget(self.plotSliderWidget, 4, 0, 1, 2)
 
         self.additionalOptionsCombo = QComboBox()
@@ -71,7 +78,16 @@ class IAnalysisPage(QWidget):
                 self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data)
       
     def onPlotSliderValueChanged(self, value):
-        print(f"Plot slider value changed: {value}")
+        # Debounce rapid slider movement; keep UI responsive.
+        self._pending_plot_slider_value = int(value)
+        # Restart timer to coalesce events during dragging.
+        self._plot_update_timer.start(30)
+
+    def _applyPendingPlotSliderValue(self):
+        if self._pending_plot_slider_value is None or not self.dataModel:
+            return
+        value = self._pending_plot_slider_value
+        self._pending_plot_slider_value = None
         self.dataModel.setIndex(value)
         self.redrawPlot()
             
