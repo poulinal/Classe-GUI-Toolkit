@@ -7,6 +7,7 @@ from CGTProject.models.temperatureDataModel import TemperatureDataModel
 from CGTProject.models.temperatureDaskDataModel import TemperatureDaskDataModel
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
 from CGTProject.widgets.plottedLineModesGraphWidget import PlottedLineModesGraphWidget
+from CGTProject.widgets.trimDataDialogue import TrimDataDialogue
 from CGTProject.widgets.lineCutOptionsDialogue import LineCutOptionsDialogue
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
 from CGTProject.widgets.deltaPDFOptionsDialogue import DeltaPDFOptionsWidget
@@ -138,6 +139,13 @@ class MainAnalysisPage(IAnalysisPage):
                 elif isinstance(self.dataModel, TemperatureDataModel):
                     print("Data model is TemperatureDataModel, updating plot with new quad mesh data")
                     self.plotted_graph_widget.updateQuadMeshPlot(dataQuadMesh=quad_mesh_data, autoscale=autoscale)
+                else:
+                    print(f"Data model is {type(self.dataModel).__name__}, updating plot with new quad mesh data")
+                    if isinstance(quad_mesh_data, tuple) and len(quad_mesh_data) == 3:
+                        self.plotted_graph_widget.updateQuadMeshPlot(dataTuple=quad_mesh_data, autoscale=autoscale)
+                    else:
+                        self.plotted_graph_widget.updateQuadMeshPlot(dataQuadMesh=quad_mesh_data, autoscale=autoscale)
+                self._applyCurrentContrastRamp()
             
                 
     def onSubmitLineCut(self, verticle : bool):
@@ -197,7 +205,19 @@ class MainAnalysisPage(IAnalysisPage):
             
     def onOpenDeltaPDFOptionsDialogue(self):
         print("Opening Delta PDF Options Dialogue...")
-        deltaPDFOptionsDialog = DeltaPDFOptionsWidget(self.dataModel.getCurrentData())
+        current_data = self.dataModel.getCurrentData()
+        if current_data is None:
+            self.plotted_graph_widget.toggleDeltaPDFMode(False)
+            return
+
+        trim_dialog = TrimDataDialogue(current_data, self)
+        if trim_dialog.exec_() != QDialog.Accepted:
+            self.plotted_graph_widget.toggleDeltaPDFMode(False)
+            return
+
+        trimmed_data = trim_dialog.getTrimmedData()
+
+        deltaPDFOptionsDialog = DeltaPDFOptionsWidget(trimmed_data, self)
         if deltaPDFOptionsDialog.exec_() == QDialog.Accepted:
             print("Delta PDF options accepted")
             # Retrieve options from the dialog

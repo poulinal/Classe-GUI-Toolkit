@@ -10,6 +10,7 @@ from CGTProject.models.dataModel import DataModel
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
 from CGTProject.widgets.plottedLineModesGraphWidget import PlottedLineModesGraphWidget
 from CGTProject.widgets.lineCutOptionsDialogue import LineCutOptionsDialogue
+from CGTProject.widgets.colorRampSlider import ColorRampWidget
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
 from CGTProject.widgets.deltaPDFOptionsDialogue import DeltaPDFOptionsWidget
 
@@ -61,7 +62,14 @@ class IAnalysisPage(QWidget):
         self.plotSliderWidget.setEnabled(False)
         self.plotSliderWidget.valueChanged.connect(self.onPlotSliderValueChanged)
         self.plotSliderWidget.sliderReleased.connect(self._onPlotSliderReleased)
-        self.layout.addWidget(self.plotSliderWidget, 4, 0, 1, 2)
+
+        self.colorRampWidget = ColorRampWidget()
+        self.colorRampWidget.valueChanged.connect(self.onContrastRampValueChanged)
+
+        self.plotControlsLayout = QVBoxLayout()
+        self.plotControlsLayout.addWidget(self.plotSliderWidget)
+        self.plotControlsLayout.addWidget(self.colorRampWidget)
+        self.layout.addLayout(self.plotControlsLayout, 4, 0, 1, 2)
 
         self.additionalOptionsCombo = QComboBox()
         self.additionalOptionsCombo.addItems(["--", "Change colormap", "Skew Angle"])
@@ -81,6 +89,17 @@ class IAnalysisPage(QWidget):
                 autoscale = bool(getattr(self, "_autoscale_next_redraw", True))
                 self._autoscale_next_redraw = True
                 self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data, autoscale=autoscale)
+                self._applyCurrentContrastRamp()
+
+    def onContrastRampValueChanged(self, black_position: float, white_position: float):
+        if self.plotted_graph_widget:
+            self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+
+    def _applyCurrentContrastRamp(self):
+        if not self.plotted_graph_widget or not hasattr(self, "colorRampWidget"):
+            return
+        black_position, white_position = self.colorRampWidget.get_slider_position()
+        self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
       
     def onPlotSliderValueChanged(self, value):
         # Debounce rapid slider movement; keep UI responsive.
@@ -143,6 +162,7 @@ class IAnalysisPage(QWidget):
         print(f"Applying skew angle: {angle}")
         quadmesh = self.dataModel.updateSkewAngle(angle)
         self.plotted_graph_widget.updateQuadMeshPlot(quadmesh)
+        self._applyCurrentContrastRamp()
         
     def changeColormap(self, newCmap):
         print("Changing colormap...")

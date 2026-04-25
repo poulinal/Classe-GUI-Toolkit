@@ -101,8 +101,10 @@ class TemperatureDaskDataModel(DataModel):
 
         for metadata in self.dataMetadata:
             temp_value = metadata.split("_")[-1].split(".nxs")[0]
-            fullpath = metadata if os.path.isabs(metadata) else os.path.join(self.dataPathRoot, metadata)
-            self.dic_temp_to_path[temp_value] = fullpath
+            #if temp_value str is an integer
+            if temp_value.isdigit():
+                fullpath = metadata if os.path.isabs(metadata) else os.path.join(self.dataPathRoot, metadata)
+                self.dic_temp_to_path[temp_value] = fullpath
 
     def getTemperatureValues(self):
         return list(self.dic_temp_to_path.keys())
@@ -271,6 +273,7 @@ class TemperatureDaskDataModel(DataModel):
 
             if not os.path.exists(fast_standalone_nxs_path):
                 # Materialize a standalone file (no NXlink/external-file dependencies) in HKL order.
+                print(f"fast load does not exist already, creating: {fast_standalone_nxs_path}")
                 save_transform_standalone_nxs(
                     metadata_path,
                     out_path=fast_standalone_nxs_path,
@@ -283,9 +286,6 @@ class TemperatureDaskDataModel(DataModel):
 
             # New dataset loaded: clear any cached axis arrays.
             self._axis_numpy_cache.clear()
-            
-            
-            self._evict_if_needed()
             
             
             self._evict_if_needed()
@@ -376,3 +376,8 @@ class TemperatureDaskDataModel(DataModel):
         
         #and include graph options like cmap, vmin vmax colorramp, skewangle
         return extracted_data
+    
+    
+    
+    
+    

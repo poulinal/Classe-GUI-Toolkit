@@ -23,6 +23,16 @@ class DiffuseDataModel(DataModel):
         
     def getCurrentData(self) -> Optional[NXdata]:
         return self.dpdf.fft #self.dic_temp_to_data.get(self.temperature, None)
+
+    def setData(self, data):
+        self.dpdf = data
+
+    def initializeAllData(self):
+        # Diffuse mode is initialized with an already-built DeltaPDF instance.
+        pass
+
+    def dataIsValid(self):
+        return self.dpdf is not None and getattr(self.dpdf, "fft", None) is not None
     
     # self.page_title.setText("Delta PDF Analysis")
         # plot_slice(dpdf.fft[:,:,0.0]/1e3, cmap='seismic',

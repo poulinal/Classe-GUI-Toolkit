@@ -34,13 +34,13 @@
 #also allow logscale option for plottedGraphWidget
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QPushButton, QComboBox, QFormLayout, QDialog, QScrollArea, QProgressBar
-from PyQt5.QtCore import pyqtSignal, Qt, QObject, QThread, QTimer
+from PyQt5.QtCore import pyqtSignal, Qt, QObject, QThread
 import numpy as np
 from typing import Optional
 
 from nxs_analysis_tools.pairdistribution import DeltaPDF
+from CGTProject.utilities.memoryLogger import log_critical_point
 from nxs_analysis_tools.pairdistribution import Gaussian3DKernel
-from nxs_analysis_tools.datareduction import plot_slice
 from nexusformat.nexus import NXdata, NeXusError, nxsetmemory, NXfield
 
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
@@ -56,10 +56,13 @@ class _DeltaPDFLoadWorker(QObject):
 
     def run(self):
         try:
+            log_critical_point("DeltaPDF_Load_Start", "Initializing DeltaPDF and setting data")
             dpdf = DeltaPDF()
             dpdf.set_data(self._nxdata)
+            log_critical_point("DeltaPDF_Load_Complete", "Successfully loaded DeltaPDF data")
             self.finished.emit(dpdf)
         except Exception as e:
+            log_critical_point("DeltaPDF_Load_Error", f"Failed: {str(e)}")
             self.failed.emit(str(e))
 
 
@@ -88,7 +91,7 @@ class _DeltaPDFBuildWorker(QObject):
                     opt.get("bragg_coeffs_lh"),
                 )
             else:
-                coeffs = (None, None, None, None, None, None)
+                coeffs = None
             thresh = opt.get("bragg_thresh") if opt.get("bragg_thresh_enabled") else None
             mask = dpdf.generate_bragg_mask(punch_radius=punch_radius, coeffs=coeffs, thresh=thresh)
 
@@ -109,9 +112,11 @@ class _DeltaPDFBuildWorker(QObject):
 
     def run(self):
         try:
+            log_critical_point("DeltaPDF_Build_Start", "Building DeltaPDF with options")
             opt = self._options
             dpdf = DeltaPDF()
             dpdf.set_data(self._nxdata)
+            log_critical_point("DeltaPDF_Build_SetData", "Data loaded")
 
             dpdf.set_lattice_params((
                 opt["a"], opt["b"], opt["c"],
@@ -120,14 +125,18 @@ class _DeltaPDFBuildWorker(QObject):
 
             mask = self._generate_mask(dpdf)
             if mask is not None:
+                log_critical_point("DeltaPDF_Build_MaskGenerated", f"Mask type applied")
                 dpdf.add_mask(mask)
                 dpdf.punch()
+                log_critical_point("DeltaPDF_Build_Punched", "Mask punched")
 
             kernel_kind = opt.get("kernel_kind")
             if kernel_kind == "Gaussian":
                 size = opt.get("gaussian_size")
+                log_critical_point("DeltaPDF_Build_KernelStart", f"Setting Gaussian kernel (size={size})")
                 dpdf.set_kernel(Gaussian3DKernel(stddev=opt.get("gaussian_stddev"), size=size))
                 dpdf.interpolate()
+                log_critical_point("DeltaPDF_Build_KernelComplete", "Kernel interpolated")
 
             taper_kind = opt.get("taper_kind")
             if taper_kind == "Tukey":
@@ -152,11 +161,15 @@ class _DeltaPDFBuildWorker(QObject):
 
             padding = opt.get("padding")
             if padding and tuple(padding) != (0, 0, 0):
+                log_critical_point("DeltaPDF_Build_Padding", f"Padding data: {padding}")
                 dpdf.pad(padding=tuple(padding))
 
+            log_critical_point("DeltaPDF_Build_FFTStart", "Starting FFT computation")
             dpdf.perform_fft()
+            log_critical_point("DeltaPDF_Build_Complete", "FFT completed successfully")
             self.finished.emit(dpdf)
         except Exception as e:
+            log_critical_point("DeltaPDF_Build_Error", f"Failed: {str(e)}")
             self.failed.emit(str(e))
 
 
@@ -172,13 +185,12 @@ class DeltaPDFOptionsWidget(QDialog):
         
         self.nxdata = nxdata
         # IMPORTANT: DeltaPDF.set_data(...) can be very expensive (may materialize the full 3D volume).
-        # We load it in the background for previews, and compute the final dpdf in the background on OK.
-        self._preview_dpdf: Optional[DeltaPDF] = None
+        # Previews use a reduced center-slice volume; final OK compute still uses full data.
         self._result_dpdf: Optional[DeltaPDF] = None
 
-        self._preload_thread: Optional[QThread] = None
-        self._preload_worker: Optional[_DeltaPDFLoadWorker] = None
-        self._preload_in_progress: bool = False
+        # Preview controls: keep preview volume small to avoid large temporary arrays.
+        self._preview_max_xy_points: int = 128
+        self._preview_z_slices: int = 1
 
         self._build_thread: Optional[QThread] = None
         self._build_worker: Optional[_DeltaPDFBuildWorker] = None
@@ -239,9 +251,6 @@ class DeltaPDFOptionsWidget(QDialog):
         
         self.setLayout(layout)
 
-        # Kick off preview data load after the dialog has a chance to show.
-        QTimer.singleShot(0, self._startPreviewPreload)
-
     def _setBusy(self, busy: bool, message: str = "", *, disable_ok: bool = True):
         self.busyBar.setVisible(busy)
         self.busyBar.setRange(0, 0 if busy else 1)
@@ -249,36 +258,34 @@ class DeltaPDFOptionsWidget(QDialog):
         if disable_ok:
             self.ok_button.setEnabled(not busy)
 
-    def _startPreviewPreload(self):
-        if self._preview_dpdf is not None or self._preload_in_progress:
-            return
-        self._preload_in_progress = True
-        self._setBusy(True, "Loading data for previews…", disable_ok=False)
+    def _build_preview_nxdata(self) -> NXdata:
+        """Builds a reduced center-slice volume used only for quick previews."""
+        data = self.nxdata
+        counts = data[data.signal].nxdata
 
-        thread = QThread(self)
-        worker = _DeltaPDFLoadWorker(self.nxdata)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._onPreviewPreloadFinished)
-        worker.failed.connect(self._onPreviewPreloadFailed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(thread.deleteLater)
+        sx, sy, sz = counts.shape
+        x_step = max(1, int(np.ceil(sx / self._preview_max_xy_points)))
+        y_step = max(1, int(np.ceil(sy / self._preview_max_xy_points)))
 
-        self._preload_thread = thread
-        self._preload_worker = worker
-        thread.start()
+        z_keep = max(1, int(self._preview_z_slices))
+        z_center = sz // 2
+        z_start = max(0, z_center - (z_keep // 2))
+        z_end = min(sz, z_start + z_keep)
+        if z_end <= z_start:
+            z_start = max(0, z_center)
+            z_end = min(sz, z_start + 1)
 
-    def _onPreviewPreloadFinished(self, dpdf: DeltaPDF):
-        self._preview_dpdf = dpdf
-        self._preload_in_progress = False
-        if not self._build_in_progress:
-            self._setBusy(False, "", disable_ok=False)
+        x_slice = slice(0, sx, x_step)
+        y_slice = slice(0, sy, y_step)
+        z_slice = slice(z_start, z_end)
 
-    def _onPreviewPreloadFailed(self, msg: str):
-        self._preload_in_progress = False
-        if not self._build_in_progress:
-            self._setBusy(False, f"Preview load failed: {msg}", disable_ok=False)
+        reduced_counts = counts[x_slice, y_slice, z_slice]
+        reduced_axes = (
+            NXfield(data[data.axes[0]].nxdata[x_slice], name=data.axes[0]),
+            NXfield(data[data.axes[1]].nxdata[y_slice], name=data.axes[1]),
+            NXfield(data[data.axes[2]].nxdata[z_slice], name=data.axes[2]),
+        )
+        return NXdata(NXfield(reduced_counts, name=data.signal), reduced_axes)
 
     def _collect_options(self) -> dict:
         return {
@@ -386,11 +393,15 @@ class DeltaPDFOptionsWidget(QDialog):
         self.reject()
 
     def _get_preview_dpdf(self) -> Optional[DeltaPDF]:
-        """Returns the preview DeltaPDF if loaded; otherwise triggers background load."""
-        if self._preview_dpdf is not None:
-            return self._preview_dpdf
-        self._startPreviewPreload()
-        return None
+        """Builds a lightweight DeltaPDF from a reduced center-slice preview volume."""
+        try:
+            preview_data = self._build_preview_nxdata()
+            dpdf = DeltaPDF()
+            dpdf.set_data(preview_data)
+            return dpdf
+        except Exception as e:
+            self.statusLabel.setText(f"Preview setup failed: {e}")
+            return None
         
         
     def initSetup(self):
@@ -480,7 +491,7 @@ class DeltaPDFOptionsWidget(QDialog):
                     self.braggCoeffsLH.value(),
                 )
             else:
-                coeffs = (None, None, None, None, None, None)
+                coeffs = None
             if self.braggThreshCheckBox.isChecked():
                 thresh = self.braggThresh.value()
             else:                
@@ -707,7 +718,6 @@ class DeltaPDFOptionsWidget(QDialog):
         # ensure lattice params are set on the preview dpdf
         dpdf = self._get_preview_dpdf()
         if dpdf is None:
-            self._setBusy(True, "Loading data for previews…", disable_ok=False)
             return
         try:
             dpdf.set_lattice_params((
@@ -784,7 +794,6 @@ class DeltaPDFOptionsWidget(QDialog):
     def generate_kernal_preview(self):
         dpdf = self._get_preview_dpdf()
         if dpdf is None:
-            self._setBusy(True, "Loading data for previews…", disable_ok=False)
             return
         self.kernalPlotPreview.setVisible(True)
         if self.kernalComboBox.currentText() == "Gaussian":
@@ -793,8 +802,11 @@ class DeltaPDFOptionsWidget(QDialog):
             dpdf.set_kernel(Gaussian3DKernel(stddev=self.gaussianStdev.value(), size=size))
             dpdf.interpolate()
             try:
-                quadmesh = plot_slice(dpdf.interpolated[:,:,0.0])
-                self.kernalPlotPreview.updateQuadMeshPlot(quadmesh)
+                interp = dpdf.interpolated[dpdf.interpolated.signal].nxdata
+                self.kernalPlotPreview.updatePColorMeshPlot(
+                    interp[:, :, interp.shape[2] // 2].transpose(),
+                    title="Kernel Preview"
+                )
             except Exception:
                 self._show_empty_preview(self.kernalPlotPreview, "Kernel Preview (unable to render)")
         else:
@@ -920,7 +932,6 @@ class DeltaPDFOptionsWidget(QDialog):
     def generate_taper_preview(self):
         dpdf = self._get_preview_dpdf()
         if dpdf is None:
-            self._setBusy(True, "Loading data for previews…", disable_ok=False)
             return
         txt = self.taperComboBox.currentText()
         if txt == "Tukey":
@@ -995,7 +1006,6 @@ class DeltaPDFOptionsWidget(QDialog):
     def generate_padding_preview(self):
         dpdf = self._get_preview_dpdf()
         if dpdf is None:
-            self._setBusy(True, "Loading data for previews…", disable_ok=False)
             return
         padding = (int(self.paddingX.value()), int(self.paddingY.value()), int(self.paddingZ.value()))
         # store or use padding tuple as needed; preview placeholder
