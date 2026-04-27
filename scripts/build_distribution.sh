@@ -25,6 +25,11 @@ pyinstaller \
   --collect-submodules scipy \
   --collect-submodules nexusformat \
   --collect-submodules nxs_analysis_tools \
+  --collect-submodules pooch \
+  --collect-submodules pandas \
+  --collect-submodules lmfit \
+  --collect-submodules astropy \
+  --collect-submodules pyfftw \
   --hidden-import PyQt5.sip \
   --contents-directory . \
   CGTProject/main.py

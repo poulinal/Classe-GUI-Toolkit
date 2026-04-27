@@ -13,11 +13,16 @@ dependencies = [
 	"numpy",
 	"scipy",
 	"matplotlib",
+	"pandas",
 	"PyQt5",
 	"h5py",
 	"psutil",
+	"lmfit",
+	"astropy",
+	"pyfftw",
 	"nexusformat",
     "dask",
+	"pooch",
 	"nxs-analysis-tools",
 ]
 
