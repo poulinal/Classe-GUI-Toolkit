@@ -102,3 +102,14 @@ git push origin v0.1.0
 ```
 
 That tag push will build the Linux executable on GitHub Actions and attach the zip file to the GitHub Release.
+
+The release binary is built in an older Ubuntu 20.04 container so it stays compatible with systems that do not have very new glibc versions.
+
+If you already published a bad release, create a new tag after updating the workflow, for example:
+
+```bash
+git tag v0.0.2
+git push origin v0.0.2
+```
+
+Then download the new `CGTProject-linux-x86_64.zip` asset from that release.

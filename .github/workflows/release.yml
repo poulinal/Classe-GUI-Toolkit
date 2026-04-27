@@ -11,6 +11,8 @@ permissions:
 jobs:
   build-linux-release:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
 
     steps:
       - name: Checkout repository
@@ -23,8 +25,11 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
             libgl1 \
             libglib2.0-0 \
             libxkbcommon-x11-0 \
@@ -35,6 +40,10 @@ jobs:
             libxcb-keysyms1 \
             libxcb-render-util0 \
             patchelf \
+            python3 \
+            python3-pip \
+            python3-venv \
+            unzip \
             zip
 
       - name: Upgrade pip
