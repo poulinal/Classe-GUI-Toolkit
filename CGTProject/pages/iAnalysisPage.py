@@ -63,11 +63,16 @@ class IAnalysisPage(QWidget):
         self.plotSliderWidget.valueChanged.connect(self.onPlotSliderValueChanged)
         self.plotSliderWidget.sliderReleased.connect(self._onPlotSliderReleased)
 
+        self.plotSliderValueLabel = QLabel("Slice: 0 / 0")
+        self.plotSliderValueLabel.setAlignment(Qt.AlignCenter)
+        self.plotSliderWidget.valueChanged.connect(self._updatePlotSliderValueLabel)
+
         self.colorRampWidget = ColorRampWidget()
         self.colorRampWidget.valueChanged.connect(self.onContrastRampValueChanged)
 
         self.plotControlsLayout = QVBoxLayout()
         self.plotControlsLayout.addWidget(self.plotSliderWidget)
+        self.plotControlsLayout.addWidget(self.plotSliderValueLabel)
         self.plotControlsLayout.addWidget(self.colorRampWidget)
         self.layout.addLayout(self.plotControlsLayout, 4, 0, 1, 2)
 
@@ -90,6 +95,13 @@ class IAnalysisPage(QWidget):
                 self._autoscale_next_redraw = True
                 self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data, autoscale=autoscale)
                 self._applyCurrentContrastRamp()
+
+    def _updatePlotSliderValueLabel(self, value: int):
+        self.plotSliderValueLabel.setText(f"Slice: {value} / {self.plotSliderWidget.maximum()}")
+
+    def _setPlotSliderMaximum(self, maximum: int):
+        self.plotSliderWidget.setMaximum(maximum)
+        self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
 
     def onContrastRampValueChanged(self, black_position: float, white_position: float):
         if self.plotted_graph_widget:

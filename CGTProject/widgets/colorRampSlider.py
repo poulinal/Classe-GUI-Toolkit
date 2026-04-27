@@ -2,7 +2,7 @@
 import sys
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QMouseEvent
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QHBoxLayout
 
 class ColorRampWidget(QWidget):
     
@@ -10,11 +10,22 @@ class ColorRampWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._outer_layout = QVBoxLayout(self)
         self.setMinimumHeight(50)
         self.black_position = 0.0
         self.white_position = 1.0
         self.slider_radius = 6
         self.selected_slider = None
+
+        self.rangeLabel = QLabel(self)
+        self.rangeLabel.setAlignment(Qt.AlignCenter)
+        self._outer_layout.addWidget(self.rangeLabel)
+        self._update_range_label()
+
+    def _update_range_label(self):
+        self.rangeLabel.setText(
+            f"Black: {self.black_position:.2f}   White: {self.white_position:.2f}"
+        )
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -63,6 +74,8 @@ class ColorRampWidget(QWidget):
             self.black_position = min(position, self.white_position - 0.01)
         elif self.selected_slider == 'white':
             self.white_position = max(position, self.black_position + 0.01)
+
+        self._update_range_label()
             
         self.valueChanged.emit(self.black_position, self.white_position)
         
