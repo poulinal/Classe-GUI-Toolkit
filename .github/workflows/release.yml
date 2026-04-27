@@ -22,9 +22,6 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            git \
             libgl1 \
             libglib2.0-0 \
             libxkbcommon-x11-0 \
@@ -35,20 +32,17 @@ jobs:
             libxcb-keysyms1 \
             libxcb-render-util0 \
             patchelf \
-            python3 \
-            python3-pip \
-            python3-venv \
-            unzip \
             zip
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
-
-      - name: Install project build dependencies
-        run: python -m pip install -e ".[build]"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install nxs-analysis-tools || python -m pip install git+https://github.com/stevenjgomez/nxs_analysis_tools.git
+          python -m pip install -e ".[build]"
 
       - name: Build standalone executable
-        run: ./scripts/build_distribution.sh
+        run: |
+          ./scripts/build_distribution.sh
 
       - name: Package release artifact
         run: |

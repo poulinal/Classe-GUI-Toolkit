@@ -17,6 +17,8 @@ dependencies = [
 	"h5py",
 	"psutil",
 	"nexusformat",
+    "dask",
+	"nxs-analysis-tools",
 ]
 
 [project.scripts]
@@ -27,4 +29,8 @@ build = [
 	"build",
 	"pyinstaller>=6.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["CGTProject*"]
+exclude = ["builds*", "logs*"]
 

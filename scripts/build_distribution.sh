@@ -24,6 +24,7 @@ pyinstaller \
   --collect-submodules matplotlib \
   --collect-submodules scipy \
   --collect-submodules nexusformat \
+  --collect-submodules nxs_analysis_tools \
   --hidden-import PyQt5.sip \
   --contents-directory . \
   CGTProject/main.py

@@ -16,6 +16,8 @@ GUI Application Toolkit for CLASSE
 ```conda create myenv```
 ```conda activate myenv```
 
+If `nxs_analysis_tools` is only available after activating the CHESS/CLASSE environment, do that before installing or building the app.
+
 `cd` to `~/Classe-GUI-Toolkit/`
 
 ```pip install -e .```
@@ -54,7 +56,7 @@ cgtproject
 
 ## Standalone Distribution (No Python Env Required For End User)
 
-Build a self-contained executable:
+Build a self-contained executable from the same Python environment that provides `nxs_analysis_tools`:
 
 ```bash
 ./scripts/build_distribution.sh
@@ -103,7 +105,9 @@ git push origin v0.1.0
 
 That tag push will build the Linux executable on GitHub Actions and attach the zip file to the GitHub Release.
 
-The release binary is built in an older Ubuntu 20.04 container so it stays compatible with systems that do not have very new glibc versions.
+The release workflow runs on a GitHub-hosted runner using a Linux container image and installs `nxs-analysis-tools` from PyPI (with a fallback install from `https://github.com/stevenjgomez/nxs_analysis_tools`).
+
+The project metadata already includes `dask` as a runtime dependency.
 
 If you already published a bad release, create a new tag after updating the workflow, for example:
 
