@@ -1,5 +1,5 @@
 # AP 2026
-from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QScrollArea
+from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QScrollArea, QProgressBar, QApplication
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QSignalBlocker
 
 import numpy as np
@@ -121,6 +121,11 @@ class MainAnalysisPage(IAnalysisPage):
         self.file_manager_widget.submitOptions.connect(self.onFileOptionsSubmit)
         self.layout.addWidget(self.file_manager_widget, 1, 0, 1, 3)
 
+        self.loadProgressBar = QProgressBar()
+        self.loadProgressBar.setRange(0, 100)
+        self.loadProgressBar.setVisible(False)
+        self.layout.addWidget(self.loadProgressBar, 1, 3, 1, 2)
+
         self.back_btn = QPushButton("← Back to Main Menu")
         self.layout.addWidget(self.back_btn, 6, 0, 1, 3)
 
@@ -150,6 +155,18 @@ class MainAnalysisPage(IAnalysisPage):
             self.additionalOptionsCombo.addItem("Trim Data")
 
         self.setLayout(self.layout)
+
+    def _setLoadProgress(self, percent: int, message: str = ""):
+        self.loadProgressBar.setVisible(True)
+        self.loadProgressBar.setValue(max(0, min(100, percent)))
+        self.loadProgressBar.setFormat(f"{message} %p%" if message else "%p%")
+        QApplication.processEvents()
+
+    def _finishLoadProgress(self):
+        self.loadProgressBar.setValue(100)
+        self.loadProgressBar.setVisible(False)
+        self.loadProgressBar.setFormat("%p%")
+        QApplication.processEvents()
         
     def onDataPathSelected(self, filePathTuple : tuple[str, list]):
         print(f"Data path selected: {filePathTuple}")
@@ -176,16 +193,23 @@ class MainAnalysisPage(IAnalysisPage):
             
     def onFileOptionsSubmit(self):
         print(f"File Options Widget Submitted changed: {self.file_manager_widget.getTemperatureComboValue()}")
-        self.dataModel.setTemperature(self.file_manager_widget.getTemperatureComboValue())
-        self.dataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
+        try:
+            self._setLoadProgress(0, "Loading data")
+            self.dataModel.setTemperature(
+                self.file_manager_widget.getTemperatureComboValue(),
+                progress_callback=self._setLoadProgress,
+            )
+            self.dataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
         
-        self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
-        self.plotSliderWidget.setEnabled(True)
-        self._resetTrimState()
-        
-        # self.preLoadPlotsOption.setEnabled(True)
-        
-        self.redrawPlot()
+            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
+            self.plotSliderWidget.setEnabled(True)
+            self._resetTrimState()
+
+            # self.preLoadPlotsOption.setEnabled(True)
+
+            self.redrawPlot()
+        finally:
+            self._finishLoadProgress()
 
     def _resetTrimState(self):
         self._trimmed_data = None

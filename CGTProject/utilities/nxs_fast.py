@@ -39,7 +39,7 @@ Notes
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Callable, Literal
 
 import numpy as np
 from numpy.lib.format import open_memmap
@@ -216,6 +216,7 @@ def save_transform_standalone_nxs(
     overwrite: bool = False,
     compression: str | None = "lzf",
     chunks: tuple[int, int, int] | Literal["auto"] | None = "auto",
+    progress_callback: Callable[[int, str], None] | None = None,
 ) -> str:
     """Write a simplified, standalone `.nxs` that contains materialized data.
 
@@ -257,6 +258,10 @@ def save_transform_standalone_nxs(
     if os.path.exists(out_path) and not overwrite:
         raise FileExistsError(f"Output already exists: {out_path}. Set overwrite=True.")
 
+    def _report(percent: int, message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(max(0, min(100, percent)), message)
+
     try:
         import h5py  # type: ignore
     except Exception as exc:  # pragma: no cover
@@ -267,6 +272,7 @@ def save_transform_standalone_nxs(
     root = nxload(path)
     transform = root.entry.transform
     src = transform.data  # expected shape (L,K,H)
+    _report(5, "Opened source data")
 
     qh = np.asarray(transform.Qh.nxdata)
     qk = np.asarray(transform.Qk.nxdata)
@@ -302,6 +308,8 @@ def save_transform_standalone_nxs(
             for l_idx in range(l_size):
                 slab_kh = src.nxdata[l_idx, :, :]  # (K,H)
                 dset[:, :, l_idx] = slab_kh.T  # (H,K)
+                if l_size:
+                    _report(5 + int(85 * (l_idx + 1) / l_size), f"Writing slab {l_idx + 1}/{l_size}")
         else:
             grp.attrs["axes"] = np.array(["Ql", "Qk", "Qh"], dtype="S")
             dset = grp.create_dataset(
@@ -313,10 +321,14 @@ def save_transform_standalone_nxs(
             )
             for l_idx in range(l_size):
                 dset[l_idx, :, :] = src.nxdata[l_idx, :, :]
+                if l_size:
+                    _report(5 + int(85 * (l_idx + 1) / l_size), f"Writing slab {l_idx + 1}/{l_size}")
 
         grp.create_dataset("Qh", data=qh)
         grp.create_dataset("Qk", data=qk)
         grp.create_dataset("Ql", data=ql)
+
+    _report(100, "Standalone cache ready")
 
     return out_path
 

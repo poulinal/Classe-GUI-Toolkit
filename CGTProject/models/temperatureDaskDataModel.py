@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import gc
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import dask.array as da
 from nexusformat.nexus import NXdata, NXfield, nxload
@@ -240,12 +240,20 @@ class TemperatureDaskDataModel(DataModel):
             del self._nx_cache[oldest]
         gc.collect()
 
-    def setTemperature(self, temperatureValue: str):
+    def _can_write_standalone_cache(self, cache_path: str) -> bool:
+        cache_dir = os.path.dirname(os.path.abspath(cache_path)) or "."
+        return os.access(cache_dir, os.W_OK | os.X_OK)
+
+    def setTemperature(self, temperatureValue: str, progress_callback: Callable[[int, str], None] | None = None):
         metadata_path = self.build_metadata_path(temperatureValue)
         if not metadata_path:
             raise ValueError(f"Temperature '{temperatureValue}' not found in metadata index.")
 
         self.temperature = temperatureValue
+
+        def _report(percent: int, message: str) -> None:
+            if progress_callback is not None:
+                progress_callback(max(0, min(100, percent)), message)
 
         # Load on demand; keep cache small
         if temperatureValue not in self._nx_cache:
@@ -271,21 +279,40 @@ class TemperatureDaskDataModel(DataModel):
             else:
                 fast_standalone_nxs_path = metadata_path + "_standalone_hkl.nxs"
 
-            if not os.path.exists(fast_standalone_nxs_path):
+            if os.path.exists(fast_standalone_nxs_path):
+                # Reuse the cached standalone file when it is already available.
+                _report(10, "Loading cached standalone data")
+                self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+            elif self._can_write_standalone_cache(fast_standalone_nxs_path):
                 # Materialize a standalone file (no NXlink/external-file dependencies) in HKL order.
                 print(f"fast load does not exist already, creating: {fast_standalone_nxs_path}")
-                save_transform_standalone_nxs(
-                    metadata_path,
-                    out_path=fast_standalone_nxs_path,
-                    order="hkl",
-                    overwrite=False,
+                try:
+                    _report(5, "Building standalone cache")
+                    save_transform_standalone_nxs(
+                        metadata_path,
+                        out_path=fast_standalone_nxs_path,
+                        order="hkl",
+                        overwrite=False,
+                        progress_callback=lambda percent, message: _report(5 + int(percent * 0.9), message),
+                    )
+                    _report(96, "Loading cached standalone data")
+                    self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+                except (PermissionError, OSError) as exc:
+                    print(
+                        f"Could not write standalone cache ({exc}); loading the original NeXus file instead."
+                    )
+                    _report(10, "Loading original NeXus data")
+                    self._nx_cache[temperatureValue] = load_transform_fast(metadata_path)
+            else:
+                print(
+                    "Standalone cache directory is not writable; loading the original NeXus file instead."
                 )
-
-            # Load the simplified standalone NXdata directly.
-            self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+                _report(10, "Loading original NeXus data")
+                self._nx_cache[temperatureValue] = load_transform_fast(metadata_path)
 
             # New dataset loaded: clear any cached axis arrays.
             self._axis_numpy_cache.clear()
+            _report(100, "Data ready")
             
             
             self._evict_if_needed()
