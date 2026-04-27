@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, 
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QTimer
 
 from abc import abstractmethod
+import numpy as np
 
 from CGTProject.widgets.fileManagerWidget import FileManagerWidget
 from CGTProject.models.temperatureDataModel import TemperatureDataModel
@@ -86,6 +87,7 @@ class IAnalysisPage(QWidget):
         self.layout.addLayout(self.additionalOptionsLayout, 3, 2, 1, 1)
 
         self.setLayout(self.layout)
+        self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
             
     def redrawPlot(self):
         if self.dataModel:
@@ -95,23 +97,66 @@ class IAnalysisPage(QWidget):
                 self._autoscale_next_redraw = True
                 self.plotted_graph_widget.updateQuadMeshPlot(quad_mesh_data, autoscale=autoscale)
                 self._applyCurrentContrastRamp()
+                self._updateColorRampLabelFromPlot()
 
     def _updatePlotSliderValueLabel(self, value: int):
-        self.plotSliderValueLabel.setText(f"Slice: {value} / {self.plotSliderWidget.maximum()}")
+        axis_label, axis_value = self._getSliceAxisValue(value)
+        if axis_label is None or axis_value is None:
+            self.plotSliderValueLabel.setText(f"Slice: {value} / {self.plotSliderWidget.maximum()}")
+        else:
+            self.plotSliderValueLabel.setText(f"{axis_label}: {axis_value:.6g}")
 
     def _setPlotSliderMaximum(self, maximum: int):
         self.plotSliderWidget.setMaximum(maximum)
         self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
 
+    def _getActivePlotData(self):
+        if self.dataModel is None:
+            return None
+        return self.dataModel.getCurrentData()
+
+    def _getSliceAxisValue(self, value: int):
+        data = self._getActivePlotData()
+        if data is None or self.dataModel is None:
+            return None, None
+
+        slice_axis_index = self.dataModel.getSliceAxisIndex()
+        if slice_axis_index < 0 or slice_axis_index >= len(data.nxaxes):
+            return None, None
+
+        axis_field = data.nxaxes[slice_axis_index]
+        axis_values = np.asarray(axis_field)
+        if axis_values.size == 0:
+            return None, None
+
+        clamped_value = max(0, min(int(value), axis_values.size - 1))
+        axis_label = getattr(axis_field, "nxname", None) or f"Axis {slice_axis_index}"
+        return axis_label, float(axis_values[clamped_value])
+
+    def _updateColorRampLabelFromPlot(self):
+        if not hasattr(self, "colorRampWidget") or not self.plotted_graph_widget:
+            return
+
+        limits = self.plotted_graph_widget.getCurrentColorLimits()
+        if not limits:
+            return
+
+        vmin, vmax = limits
+        self.colorRampWidget.setContrastLimits(vmin, vmax)
+
     def onContrastRampValueChanged(self, black_position: float, white_position: float):
         if self.plotted_graph_widget:
-            self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+            limits = self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+            if limits is not None:
+                self.colorRampWidget.setContrastLimits(*limits)
 
     def _applyCurrentContrastRamp(self):
         if not self.plotted_graph_widget or not hasattr(self, "colorRampWidget"):
             return
         black_position, white_position = self.colorRampWidget.get_slider_position()
-        self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+        limits = self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+        if limits is not None:
+            self.colorRampWidget.setContrastLimits(*limits)
       
     def onPlotSliderValueChanged(self, value):
         # Debounce rapid slider movement; keep UI responsive.

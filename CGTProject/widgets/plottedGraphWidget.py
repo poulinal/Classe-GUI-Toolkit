@@ -336,7 +336,7 @@ class PlottedGraphWidget(QWidget):
     def setNormalizedContrast(self, black_position: float, white_position: float):
         """Map normalized slider positions [0, 1] to data-space color limits."""
         if self.quadmesh is None:
-            return
+            return None
 
         array_data = self.quadmesh.get_array()
         if np.ma.isMaskedArray(array_data):
@@ -346,12 +346,12 @@ class PlottedGraphWidget(QWidget):
 
         finite_values = values[np.isfinite(values)]
         if finite_values.size == 0:
-            return
+            return None
 
         data_min = float(np.min(finite_values))
         data_max = float(np.max(finite_values))
         if data_max <= data_min:
-            return
+            return None
 
         black = max(0.0, min(float(black_position), 1.0))
         white = max(black + 1e-6, min(float(white_position), 1.0))
@@ -364,6 +364,15 @@ class PlottedGraphWidget(QWidget):
         if self.colorbar is not None:
             self.colorbar.update_normal(self.quadmesh)
         self.canvas_main.draw_idle()
+        return vmin, vmax
+
+    def getCurrentColorLimits(self):
+        if self.quadmesh is None:
+            return None
+        try:
+            return self.quadmesh.get_clim()
+        except Exception:
+            return None
             
     def remove_line(self):
         """Remove line and points from plot"""

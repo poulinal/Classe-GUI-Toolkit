@@ -96,11 +96,13 @@ class MainAnalysisPage(IAnalysisPage):
     openDeltaPDF = pyqtSignal(DeltaPDF)
     
     def __init__(self, settings : QSettings):
-        super().__init__(settings)
-        self.extractedData = None
+        self.dataModel: TemperatureDaskDataModel | TemperatureDataModel | None = None
+        self._trimmed_data: NXdata | None = None
         self._trim_axis_index: int = 0
         self._trim_segment_widgets: list[_InlineTrimSegmentWidget] = []
         self._trim_ui_initialized: bool = False
+        super().__init__(settings)
+        self.extractedData = None
         
         self.initAdditionalUI()
 
@@ -200,6 +202,9 @@ class MainAnalysisPage(IAnalysisPage):
         
         # self.loadData(filePathTuple)
         self.loadTemperature(filePathTuple)
+
+    def _getActivePlotData(self):
+        return self._trimmed_data if self._trimmed_data is not None else super()._getActivePlotData()
         
     def loadTemperature(self, filePathTuple : tuple[str, list]):
         # Placeholder for temperature loading logic
@@ -226,9 +231,10 @@ class MainAnalysisPage(IAnalysisPage):
             )
             self.dataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
         
-            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
+            self._setPlotSliderMaximum(self.dataModel.getMaxDepth())
             self.plotSliderWidget.setEnabled(True)
             self._resetTrimState()
+            self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
 
             # self.preLoadPlotsOption.setEnabled(True)
 
@@ -408,7 +414,7 @@ class MainAnalysisPage(IAnalysisPage):
             slice_axis_index = self.dataModel.getSliceAxisIndex()
             max_depth = len(np.asarray(self.dataModel.getCurrentData().nxaxes[slice_axis_index])) - 1
             max_depth = max(0, max_depth)
-            self.plotSliderWidget.setMaximum(max_depth)
+            self._setPlotSliderMaximum(max_depth)
             if self.plotSliderWidget.value() > max_depth:
                 self.plotSliderWidget.setValue(max_depth)
                 
@@ -430,8 +436,9 @@ class MainAnalysisPage(IAnalysisPage):
                     self.file_manager_widget.getTemperatureComboValue(),
                     progress_callback=self._setLoadProgress,
                 )
-            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
+            self._setPlotSliderMaximum(self.dataModel.getMaxDepth())
             self.plotSliderWidget.setEnabled(True)
+            self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
             self.redrawPlot()
             self._notify_success("Full dataset reloaded")
         finally:

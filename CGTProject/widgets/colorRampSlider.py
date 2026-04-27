@@ -11,9 +11,11 @@ class ColorRampWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._outer_layout = QVBoxLayout(self)
-        self.setMinimumHeight(50)
+        self.setMinimumHeight(72)
         self.black_position = 0.0
         self.white_position = 1.0
+        self.display_vmin = None
+        self.display_vmax = None
         self.slider_radius = 6
         self.selected_slider = None
 
@@ -22,10 +24,20 @@ class ColorRampWidget(QWidget):
         self._outer_layout.addWidget(self.rangeLabel)
         self._update_range_label()
 
+    def setContrastLimits(self, vmin: float, vmax: float):
+        self.display_vmin = float(vmin)
+        self.display_vmax = float(vmax)
+        self._update_range_label()
+
     def _update_range_label(self):
-        self.rangeLabel.setText(
-            f"Black: {self.black_position:.2f}   White: {self.white_position:.2f}"
-        )
+        if self.display_vmin is None or self.display_vmax is None:
+            self.rangeLabel.setText(
+                f"Black: {self.black_position:.2f}   White: {self.white_position:.2f}"
+            )
+        else:
+            self.rangeLabel.setText(
+                f"vmin: {self.display_vmin:.6g}   vmax: {self.display_vmax:.6g}"
+            )
 
     def paintEvent(self, event):
         painter = QPainter(self)
