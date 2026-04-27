@@ -368,6 +368,9 @@ class TemperatureDaskDataModel(DataModel):
                 h_half = (hMax - hMin) / 2
                 k_half = (kMax - kMin) / 2
                 l_half = deltaL / 2
+                if h_half <= 0 or k_half <= 0 or l_half <= 0:
+                    print("Invalid line cut window for H-K plane. All half-widths must be > 0.")
+                    return None
                 scissors.set_center((coords[0], coords[1], lCenter))  # Assuming the line cut is in the H-K plane for simplicity
                 scissors.set_window((h_half, k_half, l_half))
             elif self.HKLPlane == HKLPlaneEnum.H_L_Plane:
@@ -380,6 +383,9 @@ class TemperatureDaskDataModel(DataModel):
                 h_half = (hMax - hMin) / 2
                 l_half = (lMax - lMin) / 2
                 k_half = deltaK / 2
+                if h_half <= 0 or k_half <= 0 or l_half <= 0:
+                    print("Invalid line cut window for H-L plane. All half-widths must be > 0.")
+                    return None
                 scissors.set_center((coords[0], kCenter, coords[1]))  # Assuming the line cut is in the H-L plane for simplicity
                 scissors.set_window((h_half, k_half, l_half))  # Example window, adjust as needed
             elif self.HKLPlane == HKLPlaneEnum.K_L_Plane:
@@ -392,6 +398,9 @@ class TemperatureDaskDataModel(DataModel):
                 k_half = (kMax - kMin) / 2
                 l_half = (lMax - lMin) / 2
                 h_half = deltaH / 2
+                if h_half <= 0 or k_half <= 0 or l_half <= 0:
+                    print("Invalid line cut window for K-L plane. All half-widths must be > 0.")
+                    return None
                 scissors.set_center((hCenter, coords[0], coords[1]))  # Assuming the line cut is in the K-L plane for simplicity
                 scissors.set_window((h_half, k_half, l_half))  # Example window, adjust as needed
                 
@@ -399,7 +408,11 @@ class TemperatureDaskDataModel(DataModel):
         # scissors.set_window((hMin, hMax, kMin, kMax, lCenter - deltaL, lCenter + deltaL))  # Example window, adjust as needed
         # scissors.set_center((0, 0, 0)) # Placeholder center, adjust based on HKL plane and coords
         # scissors.set_window((0.1, 1, 0.2)) # Placeholder window, adjust based on HKL plane and line cut options
-        extracted_data = scissors.cut_data()
+        try:
+            extracted_data = scissors.cut_data()
+        except Exception as exc:
+            print(f"Failed to apply line cut options: {exc}")
+            return None
         
         #and include graph options like cmap, vmin vmax colorramp, skewangle
         return extracted_data

@@ -1,6 +1,6 @@
 # AP 2026
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QDialog, QCheckBox, QFormLayout, QPushButton, QSlider
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QDialog, QCheckBox, QFormLayout, QPushButton, QSlider, QMessageBox
 from PyQt5.QtCore import Qt, QSettings
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -176,12 +176,12 @@ class LineCutOptionsDialogue(QDialog):
         self.hMinEdit.setMinimum(int(np.floor(dataAxisMinMax[0][0] * 100)))
         self.hMinEdit.setMaximum(int(np.ceil(dataAxisMinMax[0][1] * 100)))
         self.hMinEdit.setSingleStep(int(np.ceil(dataAxisResolutions[0] * 100)))
-        self.hMinEdit.setValue(int((dataAxisMinMax[0][0] + dataAxisMinMax[0][1]) / 2 * 100))
+        self.hMinEdit.setValue(self.hMinEdit.minimum())
 
         self.hMaxEdit.setMinimum(int(np.floor(dataAxisMinMax[0][0] * 100)))
         self.hMaxEdit.setMaximum(int(np.ceil(dataAxisMinMax[0][1] * 100)))
         self.hMaxEdit.setSingleStep(int(np.ceil(dataAxisResolutions[0] * 100)))
-        self.hMaxEdit.setValue(int((dataAxisMinMax[0][0] + dataAxisMinMax[0][1]) / 2 * 100))
+        self.hMaxEdit.setValue(self.hMaxEdit.maximum())
         
         self.hCenterEdit.setMinimum(int(np.floor(dataAxisMinMax[0][0] * 100)))
         self.hCenterEdit.setMaximum(int(np.ceil(dataAxisMinMax[0][1] * 100)))
@@ -196,12 +196,12 @@ class LineCutOptionsDialogue(QDialog):
         self.kMinEdit.setMinimum(int(np.floor(dataAxisMinMax[1][0] * 100)))
         self.kMinEdit.setMaximum(int(np.ceil(dataAxisMinMax[1][1] * 100)))
         self.kMinEdit.setSingleStep(int(np.ceil(dataAxisResolutions[1] * 100)))
-        self.kMinEdit.setValue(int((dataAxisMinMax[1][0] + dataAxisMinMax[1][1]) / 2 * 100))
+        self.kMinEdit.setValue(self.kMinEdit.minimum())
         
         self.kMaxEdit.setMinimum(int(np.floor(dataAxisMinMax[1][0] * 100)))
         self.kMaxEdit.setMaximum(int(np.ceil(dataAxisMinMax[1][1] * 100)))
         self.kMaxEdit.setSingleStep(int(np.ceil(dataAxisResolutions[1] * 100)))
-        self.kMaxEdit.setValue(int((dataAxisMinMax[1][0] + dataAxisMinMax[1][1]) / 2 * 100))
+        self.kMaxEdit.setValue(self.kMaxEdit.maximum())
         
         self.kCenterEdit.setMinimum(int(np.floor(dataAxisMinMax[1][0] * 100)))
         self.kCenterEdit.setMaximum(int(np.ceil(dataAxisMinMax[1][1] * 100)))
@@ -216,12 +216,12 @@ class LineCutOptionsDialogue(QDialog):
         self.lMinEdit.setMinimum(int(np.floor(dataAxisMinMax[2][0] * 100)))
         self.lMinEdit.setMaximum(int(np.ceil(dataAxisMinMax[2][1] * 100)))
         self.lMinEdit.setSingleStep(int(np.ceil(dataAxisResolutions[2] * 100)))
-        self.lMinEdit.setValue(int((dataAxisMinMax[2][0] + dataAxisMinMax[2][1]) / 2 * 100))
+        self.lMinEdit.setValue(self.lMinEdit.minimum())
         
         self.lMaxEdit.setMinimum(int(np.floor(dataAxisMinMax[2][0] * 100)))
         self.lMaxEdit.setMaximum(int(np.ceil(dataAxisMinMax[2][1] * 100)))
         self.lMaxEdit.setSingleStep(int(np.ceil(dataAxisResolutions[2] * 100)))
-        self.lMaxEdit.setValue(int((dataAxisMinMax[2][0] + dataAxisMinMax[2][1]) / 2 * 100))
+        self.lMaxEdit.setValue(self.lMaxEdit.maximum())
         
         self.lCenterEdit.setMinimum(int(np.floor(dataAxisMinMax[2][0] * 100)))
         self.lCenterEdit.setMaximum(int(np.ceil(dataAxisMinMax[2][1] * 100)))
@@ -234,6 +234,10 @@ class LineCutOptionsDialogue(QDialog):
         
     def onSeePreviewChanged(self):
         # Placeholder for handling see preview option change
+        if self.mousePos is None:
+            QMessageBox.warning(self, "Preview unavailable", "No line position selected on the main plot.")
+            return
+
         scissors = Scissors()
         print(f"data: {self.currentData.tree}")
         scissors.set_data(self.currentData)
@@ -244,8 +248,14 @@ class LineCutOptionsDialogue(QDialog):
             kMax = self.kMaxEdit.value() / 100
             lCenter = self.lCenterEdit.value() / 100
             deltaL = self.deltaLEdit.value() / 100
+            h_half = (hMax - hMin) / 2
+            k_half = (kMax - kMin) / 2
+            l_half = deltaL / 2
+            if h_half <= 0 or k_half <= 0 or l_half <= 0:
+                QMessageBox.warning(self, "Invalid preview window", "Set min/max ranges and delta values so all integration widths are > 0.")
+                return
             scissors.set_center((self.mousePos[0], self.mousePos[1], lCenter))  # Assuming the line cut is in the H-K plane for simplicity
-            scissors.set_window((hMax-hMin, kMax-kMin, deltaL))  # Example window, adjust as needed
+            scissors.set_window((h_half, k_half, l_half))
         elif self.currentHKLPlane == HKLPlaneEnum.H_L_Plane:
             hMin = self.hMinEdit.value() / 100
             hMax = self.hMaxEdit.value() / 100
@@ -253,8 +263,14 @@ class LineCutOptionsDialogue(QDialog):
             lMax = self.lMaxEdit.value() / 100
             kCenter = self.kCenterEdit.value() / 100
             deltaK = self.deltaKEdit.value() / 100
+            h_half = (hMax - hMin) / 2
+            l_half = (lMax - lMin) / 2
+            k_half = deltaK / 2
+            if h_half <= 0 or l_half <= 0 or k_half <= 0:
+                QMessageBox.warning(self, "Invalid preview window", "Set min/max ranges and delta values so all integration widths are > 0.")
+                return
             scissors.set_center((self.mousePos[0], kCenter, self.mousePos[1]))  # Assuming the line cut is in the H-L plane for simplicity
-            scissors.set_window((hMax-hMin, deltaK, lMax - lMin))  # Example window, adjust as needed
+            scissors.set_window((h_half, k_half, l_half))
         elif self.currentHKLPlane == HKLPlaneEnum.K_L_Plane:
             kMin = self.kMinEdit.value() / 100
             kMax = self.kMaxEdit.value() / 100
@@ -262,10 +278,20 @@ class LineCutOptionsDialogue(QDialog):
             lMax = self.lMaxEdit.value() / 100
             hCenter = self.hCenterEdit.value() / 100
             deltaH = self.deltaHEdit.value() / 100
+            k_half = (kMax - kMin) / 2
+            l_half = (lMax - lMin) / 2
+            h_half = deltaH / 2
+            if k_half <= 0 or l_half <= 0 or h_half <= 0:
+                QMessageBox.warning(self, "Invalid preview window", "Set min/max ranges and delta values so all integration widths are > 0.")
+                return
             scissors.set_center((hCenter, self.mousePos[0], self.mousePos[1]))  # Assuming the line cut is in the K-L plane for simplicity
-            scissors.set_window((deltaH, kMax - kMin, lMax - lMin))  # Example window, adjust as needed
+            scissors.set_window((h_half, k_half, l_half))
         
-        linecut = scissors.cut_data()
+        try:
+            linecut = scissors.cut_data()
+        except Exception as exc:
+            QMessageBox.critical(self, "Preview failed", f"Could not compute line cut preview.\n{exc}")
+            return
         print(scissors.integration_window)
         
         #show preview in dialogue: 
