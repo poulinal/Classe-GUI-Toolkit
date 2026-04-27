@@ -54,14 +54,13 @@ class PlottedGraphWidget(QWidget):
         self.canvas_main.setMinimumHeight(300)
         self.ax_main = self.fig_main.add_subplot(111)
 
-        # Tighten margins so the plot fills the widget, but keep a bit of breathing room
-        # so y-axis and colorbar tick labels don't get clipped.
-        # We'll reserve a small strip for the colorbar via an appended axes (cax).
-        self.fig_main.subplots_adjust(left=0.06, right=0.98, bottom=0.06, top=0.98)
+        # Reserve explicit right-side space for colorbar ticks when embedded in Qt layouts.
+        # A slightly wider margin avoids clipping on some window sizes / DPI settings.
+        self.fig_main.subplots_adjust(left=0.06, right=0.90, bottom=0.10, top=0.98)
 
         # Dedicated colorbar axes placed adjacent to the main axes.
         self._cbar_divider = make_axes_locatable(self.ax_main)
-        self.cax = self._cbar_divider.append_axes("right", size="4.0%", pad=0.06)
+        self.cax = self._cbar_divider.append_axes("right", size="4.5%", pad=0.08)
         self.cax.set_visible(False)
         
         self.fig_profile = Figure(figsize=(8, 3))

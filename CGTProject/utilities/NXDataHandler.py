@@ -165,8 +165,9 @@ def trimNXdataToAxisSegments(nxdata: NXdata, axis_index: int, segments: list[tup
     axis_name = axis_names[axis_index]
     signal_name = nxdata.attrs['signal']
 
-    axis_data = np.asarray(nxdata[axis_name])
-    signal_data = np.asarray(nxdata[signal_name])
+    axis_field = nxdata[axis_name]
+    signal_field = nxdata[signal_name]
+    axis_data = np.asarray(axis_field)
 
     if axis_data.size == 0:
         return nxdata
@@ -186,9 +187,9 @@ def trimNXdataToAxisSegments(nxdata: NXdata, axis_index: int, segments: list[tup
     trimmed_axis_chunks: list[np.ndarray] = []
 
     for start_index, end_index in normalized_segments:
-        slicer = [slice(None)] * signal_data.ndim
+        slicer = [slice(None)] * signal_field.ndim
         slicer[axis_index] = slice(start_index, end_index + 1)
-        trimmed_signal_chunks.append(signal_data[tuple(slicer)])
+        trimmed_signal_chunks.append(np.asarray(signal_field[tuple(slicer)]))
         trimmed_axis_chunks.append(axis_data[start_index:end_index + 1])
 
     if not trimmed_signal_chunks:

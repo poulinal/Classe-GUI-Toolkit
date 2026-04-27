@@ -6,5 +6,25 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "CGTProject"
 version = "0.1.0"
+description = "GUI Application Toolkit for CLASSE"
+readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+	"numpy",
+	"scipy",
+	"matplotlib",
+	"PyQt5",
+	"h5py",
+	"psutil",
+	"nexusformat",
+]
+
+[project.scripts]
+cgtproject = "CGTProject.main:main"
+
+[project.optional-dependencies]
+build = [
+	"build",
+	"pyinstaller>=6.0",
+]
 

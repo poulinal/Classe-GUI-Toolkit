@@ -2,6 +2,71 @@
 GUI Application Toolkit for CLASSE
 
 
+## Quick Start (No Manual main.py Launch)
+
+From the project root, install once and get a command-line launcher:
+
+```bash
+python -m pip install -e .
+```
+
+Then run the app from anywhere with:
+
+```bash
+cgtproject
+```
+
+## Standalone Distribution (No Python Env Required For End User)
+
+Build a self-contained executable:
+
+```bash
+./scripts/build_distribution.sh
+```
+
+The executable is produced at:
+
+```bash
+dist/CGTProjectApp/CGTProject
+```
+
+Run from terminal:
+
+```bash
+./dist/CGTProjectApp/CGTProject
+```
+
+Install a desktop launcher (Linux):
+
+```bash
+./scripts/install_desktop_launcher.sh
+```
+
+After that, the app can be opened from the system application menu.
+
+## GitHub Releases
+
+This repository now includes a GitHub Actions workflow at:
+
+```bash
+.github/workflows/release.yml
+```
+
+It runs when you push a tag like `v0.1.0` and publishes a release asset named:
+
+```bash
+dist/CGTProject-linux-x86_64.zip
+```
+
+Typical release flow:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+That tag push will build the Linux executable on GitHub Actions and attach the zip file to the GitHub Release.
+
 
 ## To Run:
 

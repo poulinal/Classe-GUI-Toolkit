@@ -190,7 +190,8 @@ class DeltaPDFOptionsWidget(QDialog):
 
         # Preview controls: keep preview volume small to avoid large temporary arrays.
         self._preview_max_xy_points: int = 128
-        self._preview_z_slices: int = 1
+        # Keep at least 2 slices so preview algorithms that estimate spacing don't fail.
+        self._preview_z_slices: int = 2
 
         self._build_thread: Optional[QThread] = None
         self._build_worker: Optional[_DeltaPDFBuildWorker] = None
@@ -261,19 +262,39 @@ class DeltaPDFOptionsWidget(QDialog):
     def _build_preview_nxdata(self) -> NXdata:
         """Builds a reduced center-slice volume used only for quick previews."""
         data = self.nxdata
-        counts = data[data.signal].nxdata
+        signal_name = data.attrs.get("signal", None) or getattr(data, "signal", None)
+        if signal_name is None:
+            raise ValueError("Could not determine signal field for preview data.")
+
+        axes_attr = data.attrs.get("axes", None) or getattr(data, "axes", None)
+        if axes_attr is None:
+            raise ValueError("Could not determine axes fields for preview data.")
+        axis_names = [axes_attr] if isinstance(axes_attr, str) else list(axes_attr)
+        if len(axis_names) < 3:
+            raise ValueError("Preview expects 3D data with three axes.")
+
+        counts = data[signal_name].nxdata
 
         sx, sy, sz = counts.shape
+        if min(sx, sy, sz) < 2:
+            raise ValueError(
+                "Mask preview requires at least 2 points on each axis after trimming. "
+                "Widen trim segments or return to full dataset."
+            )
+
         x_step = max(1, int(np.ceil(sx / self._preview_max_xy_points)))
         y_step = max(1, int(np.ceil(sy / self._preview_max_xy_points)))
 
-        z_keep = max(1, int(self._preview_z_slices))
+        z_keep = max(2, int(self._preview_z_slices))
         z_center = sz // 2
         z_start = max(0, z_center - (z_keep // 2))
         z_end = min(sz, z_start + z_keep)
         if z_end <= z_start:
             z_start = max(0, z_center)
-            z_end = min(sz, z_start + 1)
+            z_end = min(sz, z_start + 2)
+        if (z_end - z_start) < 2:
+            z_start = max(0, sz - 2)
+            z_end = sz
 
         x_slice = slice(0, sx, x_step)
         y_slice = slice(0, sy, y_step)
@@ -281,11 +302,11 @@ class DeltaPDFOptionsWidget(QDialog):
 
         reduced_counts = counts[x_slice, y_slice, z_slice]
         reduced_axes = (
-            NXfield(data[data.axes[0]].nxdata[x_slice], name=data.axes[0]),
-            NXfield(data[data.axes[1]].nxdata[y_slice], name=data.axes[1]),
-            NXfield(data[data.axes[2]].nxdata[z_slice], name=data.axes[2]),
+            NXfield(data[axis_names[0]].nxdata[x_slice], name=axis_names[0]),
+            NXfield(data[axis_names[1]].nxdata[y_slice], name=axis_names[1]),
+            NXfield(data[axis_names[2]].nxdata[z_slice], name=axis_names[2]),
         )
-        return NXdata(NXfield(reduced_counts, name=data.signal), reduced_axes)
+        return NXdata(NXfield(reduced_counts, name=signal_name), reduced_axes)
 
     def _collect_options(self) -> dict:
         return {

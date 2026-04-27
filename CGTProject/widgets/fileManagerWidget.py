@@ -1,7 +1,7 @@
 # AP 2026
 
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLineEdit, QWidget, QComboBox, QLabel
-from PyQt5.QtCore import QDir, pyqtSignal
+from PyQt5.QtCore import QDir, QTimer, pyqtSignal
 import os
 import numpy as np
 
@@ -17,7 +17,8 @@ class FileManagerWidget(QWidget):
     
     def __init__(self, lastDirectory : str = ''):
         super().__init__()
-        self.folderDataPath : str = ""
+        self.lastDirectory: str = str(lastDirectory or '')
+        self.folderDataPath : str = self.lastDirectory
         self.selectedSampleType : str = ""
         self.selectedSample : str = ""
 
@@ -40,6 +41,8 @@ class FileManagerWidget(QWidget):
         self.selectionSummaryLineEdit.setPlaceholderText('No selection')
         
         self.folderDataPathLineEdit = QLineEdit()
+        if self.folderDataPath:
+            self.folderDataPathLineEdit.setText(self.folderDataPath)
         self.browseButton = QPushButton('Browse')
         
         self.selectSampleTypeCombo = QComboBox()
@@ -93,15 +96,39 @@ class FileManagerWidget(QWidget):
         self.setLayout(fileManagerLayout)
 
         self._updateSelectionSummary()
+        QTimer.singleShot(0, self._tryInitializeFromLastDirectory)
+
+    def _tryInitializeFromLastDirectory(self):
+        """If a previous data folder exists, pre-populate sample selectors and emit pathSelected."""
+        if not self.folderDataPath or not os.path.isdir(self.folderDataPath):
+            return
+
+        self.selectSampleTypeCombo.show()
+        self.populateSampleTypeCombo(self.folderDataPath)
+
+        if self.selectSampleTypeCombo.count() == 0:
+            return
+
+        # Ensure downstream handlers run even when index stays at 0.
+        self._onSampleTypeComboChanged(self.selectSampleTypeCombo.currentIndex())
+
+        if self.selectSampleCombo.count() == 0:
+            return
+
+        self._onSampleComboChanged(self.selectSampleCombo.currentIndex())
+        # self.pathSelected.emit((self.getSelectedSamplePath(), self.getAllSelectedSamplePaths()))
 
     def _onBrowseButtonClicked(self):
         """Handle browse button click event"""
-        self.folderDataPath = self.browsePath()
+        self.folderDataPath = self.browsePath(self.lastDirectory)
+        if self.folderDataPath:
+            self.lastDirectory = self.folderDataPath
         self.folderDataPathLineEdit.setText(self.folderDataPath)
         self._updateSelectionSummary()
         if self.getFolderDataPath() != '':
             self.selectSampleTypeCombo.show()
             self.populateSampleTypeCombo(self.getFolderDataPath())
+            self._onSampleTypeComboChanged(self.selectSampleTypeCombo.currentIndex())
             
     def _onSampleTypeComboChanged(self, index):
         """Handle sample combo box selection change event"""
@@ -131,6 +158,7 @@ class FileManagerWidget(QWidget):
         self.pathSelected.emit( (sample_directory, [sample_files]) )
         self.submitButton.setEnabled(True)
         self.folderDataPath = sample_directory
+        self.lastDirectory = sample_directory
         self.folderDataPathLineEdit.setText(self.folderDataPath)
         self.selectedSampleType = ""
         self.selectedSample = ""
@@ -255,22 +283,26 @@ class FileManagerWidget(QWidget):
     def getHKLPlaneComboValue(self) -> str:
         return self.selectHKLPlaneCombo.currentText()
 
-    def browsePath(self, lastDirectory : str = QDir().homePath()) -> str:
+    def browsePath(self, lastDirectory : str = '') -> str:
         """setups the file dialog to select a directory and sets the path_type to the selected directory
 
         Args:
             path_type (QLineEdit): QLineEdit whose text will be set to the selected directory
         """
+        start_dir = lastDirectory or self.lastDirectory or QDir().homePath()
+
         path = QFileDialog.getExistingDirectory(
         #path = getOpenFilesAndDirs(
             #parent=self,
             caption = "Select directory of sample named 'nxrefine'",
-            directory = lastDirectory,
+            directory = start_dir,
             options = QFileDialog.Option.DontUseNativeDialog,
             # filter = "Directory (*/nxrefine/)"
         )
         # self.pathSelected.emit(path)
         print(f"From filedialog we get path: {path}")
+        if path:
+            self.lastDirectory = path
         return path
     
     def getFolderDataPath(self):
