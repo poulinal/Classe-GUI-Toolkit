@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QApplication,
                              QPushButton, QStackedWidget, QLabel, QShortcut)
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal
 from PyQt5.QtGui import QKeySequence
+from CGTProject.notifications.banner import BannerManager
 from CGTProject.pages.mainAnalysisPage import MainAnalysisPage
 from CGTProject.pages.processDataPage import ProcessDataPage
 from CGTProject.pages.lineCutPage import LineCutPage
@@ -74,6 +75,8 @@ class MainWindow(QMainWindow):
         self.process_page = ProcessDataPage(settings)
         self.analyze_page = MainAnalysisPage(settings)
         # self.deltapdf_page = DeltaPDFPage(settings)
+        self.banner_manager = BannerManager(self, position=BannerManager.TOP_CENTER)
+        self.analyze_page.banner_manager = self.banner_manager
         self.analyze_page.openExtractedData.connect(lambda extractedData: self.open_line_cut(extractedData))
         self.analyze_page.openDeltaPDF.connect(lambda dpdf: self.open_delta_pdf(settings, dpdf))
         

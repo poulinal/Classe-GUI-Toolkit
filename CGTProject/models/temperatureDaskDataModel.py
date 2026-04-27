@@ -320,6 +320,19 @@ class TemperatureDaskDataModel(DataModel):
     def getCurrentData(self) -> Optional[NXdata]:
         return self._nx_cache.get(self.temperature, None)
 
+    def replaceCurrentData(self, data: NXdata):
+        if not self.temperature:
+            raise RuntimeError("No active temperature to replace.")
+        self._nx_cache[self.temperature] = data
+        self._axis_numpy_cache.clear()
+
+    def reloadCurrentData(self, progress_callback: Callable[[int, str], None] | None = None):
+        if not self.temperature:
+            raise RuntimeError("No active temperature to reload.")
+        self._nx_cache.pop(self.temperature, None)
+        self._axis_numpy_cache.clear()
+        self.setTemperature(self.temperature, progress_callback=progress_callback)
+
     def getView(self) -> LazyNXDataView:
         nx = self.getCurrentData()
         if nx is None:

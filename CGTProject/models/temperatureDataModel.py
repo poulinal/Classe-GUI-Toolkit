@@ -71,6 +71,17 @@ class TemperatureDataModel(DataModel):
             
     def getCurrentData(self) -> Optional[NXdata]:
         return self.dic_temp_to_data.get(self.temperature, None)
+
+    def replaceCurrentData(self, data: NXdata):
+        if not self.temperature:
+            raise RuntimeError("No active temperature to replace.")
+        self.dic_temp_to_data[self.temperature] = data
+
+    def reloadCurrentData(self):
+        if not self.temperature:
+            raise RuntimeError("No active temperature to reload.")
+        self.dic_temp_to_data.pop(self.temperature, None)
+        self.setTemperature(self.temperature)
             
     def initializeAllData(self):
         # Placeholder for initializing all data from the provided paths

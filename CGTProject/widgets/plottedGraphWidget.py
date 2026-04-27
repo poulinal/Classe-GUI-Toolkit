@@ -101,6 +101,22 @@ class PlottedGraphWidget(QWidget):
                 pass
             self.cax.set_visible(False)
 
+    def _attach_colorbar(self):
+        """Attach a colorbar if the figure/axes are in a valid state."""
+
+        try:
+            if getattr(self, "cax", None) is not None:
+                self.cax.set_visible(True)
+                self.colorbar = self.fig_main.colorbar(self.quadmesh, cax=self.cax)
+            else:
+                self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
+            return True
+        except Exception as exc:
+            # If the colorbar machinery is in a bad state, fall back to a plain quadmesh draw.
+            print(f"Colorbar attach failed: {exc}")
+            self._reset_colorbar()
+            return False
+
     @staticmethod
     def _centers_to_edges(centers: np.ndarray) -> np.ndarray:
         """Convert 1D bin centers to bin edges (length N+1)."""
@@ -191,12 +207,8 @@ class PlottedGraphWidget(QWidget):
                 self.quadmesh.autoscale()
             except Exception:
                 pass
-        # Draw colorbar into the dedicated axes so we keep tight margins.
-        if getattr(self, "cax", None) is not None:
-            self.cax.set_visible(True)
-            self.colorbar = self.fig_main.colorbar(self.quadmesh, cax=self.cax)
-        else:
-            self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
+
+        self._attach_colorbar()
         self.canvas_main.draw_idle()
             
     def updateNXDataPlot(self, extractedData : NXdata):

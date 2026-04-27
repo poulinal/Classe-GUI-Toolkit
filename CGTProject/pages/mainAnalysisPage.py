@@ -98,12 +98,34 @@ class MainAnalysisPage(IAnalysisPage):
     def __init__(self, settings : QSettings):
         super().__init__(settings)
         self.extractedData = None
-        self._trimmed_data: NXdata | None = None
         self._trim_axis_index: int = 0
         self._trim_segment_widgets: list[_InlineTrimSegmentWidget] = []
         self._trim_ui_initialized: bool = False
         
         self.initAdditionalUI()
+
+    def _banner_manager(self):
+        return getattr(self, "banner_manager", None)
+
+    def _notify_info(self, message: str):
+        banner_manager = self._banner_manager()
+        if banner_manager is not None:
+            banner_manager.show_info(message)
+
+    def _notify_success(self, message: str):
+        banner_manager = self._banner_manager()
+        if banner_manager is not None:
+            banner_manager.show_success(message)
+
+    def _notify_warning(self, message: str):
+        banner_manager = self._banner_manager()
+        if banner_manager is not None:
+            banner_manager.show_warning(message)
+
+    def _notify_error(self, message: str):
+        banner_manager = self._banner_manager()
+        if banner_manager is not None:
+            banner_manager.show_error(message)
         
         
     def setupDataModel(self):
@@ -170,6 +192,7 @@ class MainAnalysisPage(IAnalysisPage):
         
     def onDataPathSelected(self, filePathTuple : tuple[str, list]):
         print(f"Data path selected: {filePathTuple}")
+        self._notify_info(f"Data path selected: {filePathTuple[0]}")
         # Save last directory
         last_directory = self.file_manager_widget.getFolderDataPath()
         self.settings.setValue('lastDirectory', last_directory)
@@ -181,6 +204,7 @@ class MainAnalysisPage(IAnalysisPage):
     def loadTemperature(self, filePathTuple : tuple[str, list]):
         # Placeholder for temperature loading logic
         print(f"Loading temperature info from: {filePathTuple[0]}")
+        self._notify_info(f"Loading temperature info from: {filePathTuple[0]}")
         # data : NXdata = load_transform(filePathTuple[0])
         
         # self.dataModel = TemperatureDataModel(filePathTuple)
@@ -193,6 +217,7 @@ class MainAnalysisPage(IAnalysisPage):
             
     def onFileOptionsSubmit(self):
         print(f"File Options Widget Submitted changed: {self.file_manager_widget.getTemperatureComboValue()}")
+        self._notify_info("Applying file options and loading data")
         try:
             self._setLoadProgress(0, "Loading data")
             self.dataModel.setTemperature(
@@ -208,16 +233,13 @@ class MainAnalysisPage(IAnalysisPage):
             # self.preLoadPlotsOption.setEnabled(True)
 
             self.redrawPlot()
+            self._notify_success("Finished loading temperature data")
         finally:
             self._finishLoadProgress()
 
     def _resetTrimState(self):
-        self._trimmed_data = None
         self._trim_segment_widgets = []
         self._trim_axis_index = 0
-
-    def _getEffectiveCurrentData(self) -> NXdata | None:
-        return self._trimmed_data if self._trimmed_data is not None else self.dataModel.getCurrentData()
 
     def _getQuadMeshFromData(self, nxdata: NXdata) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         if nxdata is None or self.dataModel.HKLPlane is None:
@@ -258,37 +280,32 @@ class MainAnalysisPage(IAnalysisPage):
     def onPreLoadDataOptionChanged(self, state):
         if state == Qt.Checked:
             print("Pre-load all data option enabled")
+            self._notify_info("Pre-load all data option enabled")
             # Placeholder for pre-loading all data into memory
             # self.dataModel.preloadAllData()
         else:
             print("Pre-load all data option disabled")
+            self._notify_warning("Pre-load all data option disabled")
             # Placeholder for disabling pre-loading
             # self.dataModel.unloadData()
             
     def onLineCutModeActivated(self):
         if self.plotted_graph_widget.getLineCutMode() == LineCutModeEnum.VERTICAL:
             print("Line Cut Mode Activated: Vertical")
+            self._notify_info("Line cut mode activated: Vertical")
             self.plotSubmitVLineCut.setEnabled(True)
         elif self.plotted_graph_widget.getLineCutMode() == LineCutModeEnum.HORIZONTAL:
             print("Line Cut Mode Activated: Horizontal")
+            self._notify_info("Line cut mode activated: Horizontal")
             self.plotSubmitHLineCut.setEnabled(True)
         elif self.plotted_graph_widget.getLineCutMode() == LineCutModeEnum.BOTH:
             print("Line Cut Mode Activated: Both")
+            self._notify_info("Line cut mode activated: Both")
             self.plotSubmitVLineCut.setEnabled(True)
             self.plotSubmitHLineCut.setEnabled(True)
         
     def redrawPlot(self):
         if self.dataModel:
-            effective_data = self._getEffectiveCurrentData()
-            if effective_data is not None and self._trimmed_data is not None:
-                quad_mesh_data = self._getQuadMeshFromData(effective_data)
-                if quad_mesh_data:
-                    autoscale = bool(getattr(self, "_autoscale_next_redraw", True))
-                    self._autoscale_next_redraw = True
-                    self.plotted_graph_widget.updateQuadMeshPlot(dataTuple=quad_mesh_data, autoscale=autoscale)
-                    self._applyCurrentContrastRamp()
-                return
-
             quad_mesh_data = self.dataModel.getQuadMeshAtCurrentIndex()
             if quad_mesh_data:
                 # print(f"quadmeshdata: {quad_mesh_data}")
@@ -368,6 +385,7 @@ class MainAnalysisPage(IAnalysisPage):
 
     def _applyTrimSegments(self):
         print("applying trim segments")
+        self._notify_info("Starting trim operation")
         base_data = self.dataModel.getCurrentData()
         if base_data is None:
             return
@@ -375,25 +393,37 @@ class MainAnalysisPage(IAnalysisPage):
             return
         if not self._trimSegmentsAreValid():
             print("Trim segments cannot overlap.")
+            self._notify_warning("Trim segments cannot overlap.")
             return
 
-        self._trimmed_data = trimNXdataToAxisSegments(base_data, self._trim_axis_index, self._getTrimSegments())
+        trimmed_data = trimNXdataToAxisSegments(base_data, self._trim_axis_index, self._getTrimSegments())
+        self.dataModel.replaceCurrentData(trimmed_data)
 
-        # Keep slider bounds consistent with whichever axis is currently sliced.
+        # Keep slider bounds consistent with the active dataset.
         slice_axis_index = self.dataModel.getSliceAxisIndex()
-        max_depth = len(np.asarray(self._trimmed_data.nxaxes[slice_axis_index])) - 1
+        max_depth = len(np.asarray(self.dataModel.getCurrentData().nxaxes[slice_axis_index])) - 1
         max_depth = max(0, max_depth)
         self.plotSliderWidget.setMaximum(max_depth)
         if self.plotSliderWidget.value() > max_depth:
             self.plotSliderWidget.setValue(max_depth)
             
         print("finished applying trim segments")
+        self._notify_success("Finished applying trim segments")
 
         self.redrawPlot()
 
     def _returnToFullDataset(self):
-        self._trimmed_data = None
+        try:
+            self._setLoadProgress(0, "Reloading full dataset")
+            if hasattr(self.dataModel, "reloadCurrentData"):
+                self.dataModel.reloadCurrentData(progress_callback=self._setLoadProgress)
+            else:
+                self.dataModel.setTemperature(self.file_manager_widget.getTemperatureComboValue())
+        finally:
+            self._finishLoadProgress()
+
         self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
+        self.plotSliderWidget.setEnabled(True)
         self.redrawPlot()
 
     def _buildTrimAdditionalOptions(self):
@@ -443,11 +473,13 @@ class MainAnalysisPage(IAnalysisPage):
                 
     def onSubmitLineCut(self, verticle : bool):
         print("Submit Line Cut button clicked")
+        self._notify_info("Submitting line cut")
         # Placeholder for line cut submission logic
         lineCutOptionsDialog = LineCutOptionsDialogue(self.dataModel.getHKLPlane(), mousePos = self.plotted_graph_widget.getMousePoint(), currentData = self.dataModel.getCurrentData(), dataAxisMinMax=(self.dataModel.getDataAxisMinMax(0), self.dataModel.getDataAxisMinMax(1), self.dataModel.getDataAxisMinMax(2)), dataAxisResolutions=(self.dataModel.getDataAxisResolution(0), self.dataModel.getDataAxisResolution(1), self.dataModel.getDataAxisResolution(2)))
         
         if lineCutOptionsDialog.exec_() == QDialog.Accepted:
             print("Line cut options accepted")
+            self._notify_success("Line cut options accepted")
             # Retrieve line cut options from the dialog
             line_cut_options = lineCutOptionsDialog.getLineCutOptions()
             print(f"Line cut options: {line_cut_options}")
@@ -456,6 +488,7 @@ class MainAnalysisPage(IAnalysisPage):
             if extractedData:
                 self.openExtractedData.emit(extractedData)
             else:
+                self._notify_error("No data extracted from line cut options")
                 ValueError("No data extracted from line cut options")
             
     def onAdditionalOptionChanged(self, index):
@@ -489,7 +522,8 @@ class MainAnalysisPage(IAnalysisPage):
             
     def onOpenDeltaPDFOptionsDialogue(self):
         print("Opening Delta PDF Options Dialogue...")
-        current_data = self._getEffectiveCurrentData()
+        self._notify_info("Opening Delta PDF options")
+        current_data = self.dataModel.getCurrentData()
         if current_data is None:
             self.plotted_graph_widget.toggleDeltaPDFMode(False)
             return
@@ -497,6 +531,7 @@ class MainAnalysisPage(IAnalysisPage):
         deltaPDFOptionsDialog = DeltaPDFOptionsWidget(current_data, self)
         if deltaPDFOptionsDialog.exec_() == QDialog.Accepted:
             print("Delta PDF options accepted")
+            self._notify_success("Delta PDF options accepted")
             # Retrieve options from the dialog
             delta_pdf = deltaPDFOptionsDialog.getDeltaPDF()
             # print(f"Delta PDF options: {delta_pdf_options}")
