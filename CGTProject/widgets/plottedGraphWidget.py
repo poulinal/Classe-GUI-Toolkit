@@ -242,11 +242,7 @@ class PlottedGraphWidget(QWidget):
         self.ax_main.set_ylabel(ylabel)
         self.ax_main.set_title(title)
         self._reset_colorbar()
-        if getattr(self, "cax", None) is not None:
-            self.cax.set_visible(True)
-            self.colorbar = self.fig_main.colorbar(self.quadmesh, cax=self.cax)
-        else:
-            self.colorbar = self.fig_main.colorbar(self.quadmesh, ax=self.ax_main)
+        self._attach_colorbar()
         self.canvas_main.draw()
         
     def set_aspect(self, aspect: float):

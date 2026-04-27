@@ -386,45 +386,56 @@ class MainAnalysisPage(IAnalysisPage):
     def _applyTrimSegments(self):
         print("applying trim segments")
         self._notify_info("Starting trim operation")
-        base_data = self.dataModel.getCurrentData()
-        if base_data is None:
-            return
-        if not self._trim_segment_widgets:
-            return
-        if not self._trimSegmentsAreValid():
-            print("Trim segments cannot overlap.")
-            self._notify_warning("Trim segments cannot overlap.")
-            return
+        try:
+            self._setLoadProgress(0, "Trimming data")
+            base_data = self.dataModel.getCurrentData()
+            if base_data is None:
+                return
+            if not self._trim_segment_widgets:
+                return
+            if not self._trimSegmentsAreValid():
+                print("Trim segments cannot overlap.")
+                self._notify_warning("Trim segments cannot overlap.")
+                return
 
-        trimmed_data = trimNXdataToAxisSegments(base_data, self._trim_axis_index, self._getTrimSegments())
-        self.dataModel.replaceCurrentData(trimmed_data)
+            self._setLoadProgress(25, "Processing segments")
+            trimmed_data = trimNXdataToAxisSegments(base_data, self._trim_axis_index, self._getTrimSegments())
+            self._setLoadProgress(75, "Applying trimmed data")
+            self.dataModel.replaceCurrentData(trimmed_data)
 
-        # Keep slider bounds consistent with the active dataset.
-        slice_axis_index = self.dataModel.getSliceAxisIndex()
-        max_depth = len(np.asarray(self.dataModel.getCurrentData().nxaxes[slice_axis_index])) - 1
-        max_depth = max(0, max_depth)
-        self.plotSliderWidget.setMaximum(max_depth)
-        if self.plotSliderWidget.value() > max_depth:
-            self.plotSliderWidget.setValue(max_depth)
-            
-        print("finished applying trim segments")
-        self._notify_success("Finished applying trim segments")
+            # Keep slider bounds consistent with the active dataset.
+            self._setLoadProgress(85, "Updating display")
+            slice_axis_index = self.dataModel.getSliceAxisIndex()
+            max_depth = len(np.asarray(self.dataModel.getCurrentData().nxaxes[slice_axis_index])) - 1
+            max_depth = max(0, max_depth)
+            self.plotSliderWidget.setMaximum(max_depth)
+            if self.plotSliderWidget.value() > max_depth:
+                self.plotSliderWidget.setValue(max_depth)
+                
+            print("finished applying trim segments")
+            self._notify_success("Finished applying trim segments")
 
-        self.redrawPlot()
+            self.redrawPlot()
+        finally:
+            self._finishLoadProgress()
 
     def _returnToFullDataset(self):
+        self._notify_info("Reloading full dataset")
         try:
             self._setLoadProgress(0, "Reloading full dataset")
             if hasattr(self.dataModel, "reloadCurrentData"):
                 self.dataModel.reloadCurrentData(progress_callback=self._setLoadProgress)
             else:
-                self.dataModel.setTemperature(self.file_manager_widget.getTemperatureComboValue())
+                self.dataModel.setTemperature(
+                    self.file_manager_widget.getTemperatureComboValue(),
+                    progress_callback=self._setLoadProgress,
+                )
+            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
+            self.plotSliderWidget.setEnabled(True)
+            self.redrawPlot()
+            self._notify_success("Full dataset reloaded")
         finally:
             self._finishLoadProgress()
-
-        self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
-        self.plotSliderWidget.setEnabled(True)
-        self.redrawPlot()
 
     def _buildTrimAdditionalOptions(self):
         base_data = self.dataModel.getCurrentData()
