@@ -1,10 +1,12 @@
 # AP 2026
 from CGTProject.pages.mainMenuPage import MainWindow
+from CGTProject.notifications.dialog import show_crash_dialog
 from CGTProject.utilities.memoryLogger import initialize_monitor, cleanup_monitor
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QCoreApplication
 import sys
 import os
+import traceback
 
 
 def _configure_qt_for_x11_remote_rendering():
@@ -26,13 +28,19 @@ def main() -> int:
     _configure_qt_for_x11_remote_rendering()
 
     # Initialize memory monitoring
-    memory_monitor = initialize_monitor(interval=5.0, memory_alert_threshold=0.9)
+    initialize_monitor(interval=5.0, memory_alert_threshold=0.9)
     
     try:
         app = QApplication(sys.argv)
         window = MainWindow()
         window.show()
         return app.exec_()
+    except Exception:
+        # Show fatal error details before terminating the app.
+        error_message = traceback.format_exc()
+        print(error_message)
+        show_crash_dialog(error_message)
+        return 1
     finally:
         # Cleanup monitoring on exit
         print("Cleaning up monitor")
