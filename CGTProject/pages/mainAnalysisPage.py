@@ -510,17 +510,28 @@ class MainAnalysisPage(IAnalysisPage):
                 ValueError("No data extracted from line cut options")
             
     def onAdditionalOptionChanged(self, index):
-        selected_option = self.additionalOptionsCombo.currentText()
+        selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
         print(f"Additional option selected: {selected_option}")
+
+        # Handle only the subclass-specific options; delegate other choices to base class
+        if selected_option == "Trim Data":
+            self._clearAdditionalOptionsWidgets()
+            self.additionalOptionsLayout.addWidget(self._buildTrimAdditionalOptions())
+            return
+
         if selected_option == "--":
             self._clearAdditionalOptionsWidgets()
-        elif selected_option == "Change colormap":
+            return
+
+        if selected_option == "Change colormap":
             changeColormap = QComboBox()
             changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
             changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
             self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(changeColormap)
-        elif selected_option == "Skew Angle":
+            return
+
+        if selected_option == "Skew Angle":
             skewAngleLabel = QLabel("Skew Angle:")
             skewAngleSlider = QSlider(Qt.Horizontal)
             skewAngleSlider.setMinimum(-45)
@@ -528,14 +539,18 @@ class MainAnalysisPage(IAnalysisPage):
             skewAngleSlider.setValue(0)
             skewAngleSlider.setTickPosition(QSlider.TicksBelow)
             skewAngleSlider.setTickInterval(1)
-            #on release of slider 
             skewAngleSlider.sliderReleased.connect(lambda: self.applySkewAngle(skewAngleSlider.value()))
             self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(skewAngleLabel)
             self.additionalOptionsLayout.addWidget(skewAngleSlider)
-        elif selected_option == "Trim Data":
-            self._clearAdditionalOptionsWidgets()
-            self.additionalOptionsLayout.addWidget(self._buildTrimAdditionalOptions())
+            return
+
+        # For any other option (including the download action added in the base class), defer to IAnalysisPage
+        try:
+            super().onAdditionalOptionChanged(index)
+        except Exception:
+            # fallback: call base method with current index
+            IAnalysisPage.onAdditionalOptionChanged(self, index)
             
             
     def onOpenDeltaPDFOptionsDialogue(self):

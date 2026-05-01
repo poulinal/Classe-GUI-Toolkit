@@ -44,6 +44,7 @@ from nxs_analysis_tools.pairdistribution import Gaussian3DKernel
 from nexusformat.nexus import NXdata, NeXusError, nxsetmemory, NXfield
 
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
+from CGTProject.widgets.multiPlottingGraphWidget import MultiPlottingGraphWidget
 
 
 class _DeltaPDFLoadWorker(QObject):
@@ -155,9 +156,9 @@ class _DeltaPDFBuildWorker(QObject):
                         pass
             elif taper_kind == "Hexagonal":
                 try:
-                    dpdf.set_hexagonal_tukey_window(turkey_alphas=opt.get("hex_alpha"))
+                    dpdf.set_hexagonal_tukey_window(tukey_alphas=opt.get("hex_alpha"))
                 except TypeError:
-                    dpdf.set_hexagonal_tukey_window(turkey_alphas=opt.get("hex_alpha")[0])
+                    dpdf.set_hexagonal_tukey_window(tukey_alphas=opt.get("hex_alpha")[0])
 
             padding = opt.get("padding")
             if padding and tuple(padding) != (0, 0, 0):
@@ -525,7 +526,7 @@ class DeltaPDFOptionsWidget(QDialog):
             else:
                 thresh = None
             if self.intensityRadiusCheckBox.isChecked():
-                radius = self.intensityRadius.value()
+                radius = int(self.intensityRadius.value())
             else:
                 radius = None
             mask = dpdf.generate_intensity_mask(thresh=thresh, radius=radius)
@@ -658,9 +659,9 @@ class DeltaPDFOptionsWidget(QDialog):
         # Radius option: checkbox + spinbox shown when checked
         self.intensityRadiusCheckBox = QCheckBox("Radius")
         intensityLayout.addRow(self.intensityRadiusCheckBox)
-        self.intensityRadius = QDoubleSpinBox()
-        self.intensityRadius.setRange(0.0, 100.0)
-        self.intensityRadius.setValue(0.5)
+        self.intensityRadius = QSpinBox()
+        self.intensityRadius.setRange(0, 100)
+        self.intensityRadius.setValue(0)
         self.intensityRadius.hide()
         intensityLayout.addRow(self.intensityRadius)
         self.intensityRadiusCheckBox.stateChanged.connect(
@@ -710,10 +711,17 @@ class DeltaPDFOptionsWidget(QDialog):
         seeMaskPreviewButton.clicked.connect(lambda: self.generate_mask_preview())
         self.formLayout.addRow(seeMaskPreviewButton)
         
-        self.maskPlotPreview = PlottedGraphWidget()
+        self.maskPlotPreview = MultiPlottingGraphWidget()
         self.maskPlotPreview.setVisible(False)
         self.formLayout.addRow(self.maskPlotPreview)
     def _show_empty_preview(self, widget: PlottedGraphWidget, title: str):
+        if hasattr(widget, "axes"):
+            for ax in widget.axes:
+                ax.clear()
+                ax.set_title(title)
+            widget.canvas_main.draw()
+            return
+
         widget.ax_main.clear()
         widget.ax_main.set_title(title)
         widget.canvas_main.draw()
@@ -750,8 +758,30 @@ class DeltaPDFOptionsWidget(QDialog):
         self.maskPlotPreview.setVisible(True)
         mask = self.generateMask(dpdf)
         if mask is not None:
-            self.maskPlotPreview.updatePColorMeshPlot(mask[:,:,mask.shape[2]//2].transpose())
-            self.maskPlotPreview.ax_main.set_aspect(dpdf.lattice_params[1]/dpdf.lattice_params[0])
+            dpdf.add_mask(mask)
+            dpdf.punch()
+
+            punched_data = None
+            try:
+                punched_data = dpdf.punched[dpdf.punched.signal].nxdata
+            except Exception:
+                punched_data = None
+
+            if punched_data is not None:
+                mask_slice = mask[:, :, mask.shape[2] // 2].transpose()
+                punched_slice = punched_data[:, :, punched_data.shape[2] // 2].transpose()
+                self.maskPlotPreview.updateDualPColorMeshPlot(
+                    mask_slice,
+                    punched_slice,
+                    left_title="Mask",
+                    right_title="Punched Data",
+                    left_cmap="gray_r",
+                    right_cmap="viridis",
+                    left_aspect=dpdf.lattice_params[1] / dpdf.lattice_params[0],
+                    right_aspect=dpdf.lattice_params[1] / dpdf.lattice_params[0],
+                )
+            else:
+                self._show_empty_preview(self.maskPlotPreview, "Mask Preview (unable to render punched data)")
         else:
             self._show_empty_preview(self.maskPlotPreview, "Mask Preview (no mask generated)")
 
@@ -981,9 +1011,9 @@ class DeltaPDFOptionsWidget(QDialog):
                     pass
         elif txt == "Hexagonal":
             try:
-                dpdf.set_hexagonal_tukey_window(turkey_alphas=(self.hexAlphaH.value(), self.hexAlphaK.value(), self.hexAlphaHK.value(), self.hexAlphaL.value()))
+                dpdf.set_hexagonal_tukey_window(tukey_alphas=(self.hexAlphaH.value(), self.hexAlphaK.value(), self.hexAlphaHK.value(), self.hexAlphaL.value()))
             except TypeError:
-                dpdf.set_hexagonal_tukey_window(turkey_alphas=self.hexAlphaH.value())
+                dpdf.set_hexagonal_tukey_window(tukey_alphas=self.hexAlphaH.value())
         self.taperPlotPreview.setVisible(True)
         if getattr(dpdf, 'window', None) is not None:
             try:

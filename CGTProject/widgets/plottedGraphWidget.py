@@ -385,4 +385,6 @@ class PlottedGraphWidget(QWidget):
         self.ax_profile.clear()
         self.ax_profile.set_title('Line Profile (disabled)')
         self.canvas_profile.draw()
+
+
       

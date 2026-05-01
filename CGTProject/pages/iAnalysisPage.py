@@ -1,5 +1,7 @@
 # AP 2026
-from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout
+import os
+
+from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QFileDialog, QProgressDialog, QApplication
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QTimer
 
 from abc import abstractmethod
@@ -78,7 +80,7 @@ class IAnalysisPage(QWidget):
         self.layout.addLayout(self.plotControlsLayout, 4, 0, 1, 2)
 
         self.additionalOptionsCombo = QComboBox()
-        self.additionalOptionsCombo.addItems(["--", "Change colormap", "Skew Angle"])
+        self.additionalOptionsCombo.addItems(["--", "Change colormap", "Skew Angle", "Download current data (.nxs)"])
         self.additionalOptionsCombo.setEnabled(True)
         self.additionalOptionsCombo.currentIndexChanged.connect(self.onAdditionalOptionChanged)
         self.layout.addWidget(self.additionalOptionsCombo, 2, 2, 1, 1)
@@ -179,23 +181,17 @@ class IAnalysisPage(QWidget):
         self.redrawPlot()
             
     def onAdditionalOptionChanged(self, index):
-        selected_option = self.additionalOptionsCombo.currentText()
+        selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
+        print("test")
+        print(selected_option == "Download current data (.nxs)")
         print(f"Additional option selected: {selected_option}")
         if selected_option == "--":
-            #clear previous options
-            for i in reversed(range(self.additionalOptionsLayout.count())): 
-                widgetToRemove = self.additionalOptionsLayout.itemAt(i).widget()
-                self.additionalOptionsLayout.removeWidget(widgetToRemove)
-                widgetToRemove.setParent(None)
+            self._clearAdditionalOptionsLayout()
         elif selected_option == "Change colormap":
             changeColormap = QComboBox()
             changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
             changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
-            # Clear previous options            
-            for i in reversed(range(self.additionalOptionsLayout.count())): 
-                widgetToRemove = self.additionalOptionsLayout.itemAt(i).widget()
-                self.additionalOptionsLayout.removeWidget(widgetToRemove)
-                widgetToRemove.setParent(None)
+            self._clearAdditionalOptionsLayout()
             self.additionalOptionsLayout.addWidget(changeColormap)
         elif selected_option == "Skew Angle":
             skewAngleLabel = QLabel("Skew Angle:")
@@ -205,15 +201,149 @@ class IAnalysisPage(QWidget):
             skewAngleSlider.setValue(0)
             skewAngleSlider.setTickPosition(QSlider.TicksBelow)
             skewAngleSlider.setTickInterval(1)
-            #on release of slider 
             skewAngleSlider.sliderReleased.connect(lambda: self.applySkewAngle(skewAngleSlider.value()))
-            # Clear previous options            
-            for i in reversed(range(self.additionalOptionsLayout.count())): 
-                widgetToRemove = self.additionalOptionsLayout.itemAt(i).widget()
-                self.additionalOptionsLayout.removeWidget(widgetToRemove)
-                widgetToRemove.setParent(None)
+            self._clearAdditionalOptionsLayout()
             self.additionalOptionsLayout.addWidget(skewAngleLabel)
             self.additionalOptionsLayout.addWidget(skewAngleSlider)
+        elif selected_option == "Download current data (.nxs)":
+            QTimer.singleShot(0, self.downloadCurrentDataAsNxs)
+            QTimer.singleShot(0, lambda: self.additionalOptionsCombo.setCurrentIndex(0))
+
+    def _clearAdditionalOptionsLayout(self):
+        for i in reversed(range(self.additionalOptionsLayout.count())):
+            widgetToRemove = self.additionalOptionsLayout.itemAt(i).widget()
+            if widgetToRemove is not None:
+                self.additionalOptionsLayout.removeWidget(widgetToRemove)
+                widgetToRemove.setParent(None)
+
+    def _buildExportPath(self, save_root: str) -> str:
+        data_model = getattr(self, "dataModel", None)
+        data_path_root = str(getattr(data_model, "dataPathRoot", "") or "")
+        sample_type = os.path.basename(os.path.dirname(data_path_root)) if data_path_root else ""
+        sample_name = os.path.basename(data_path_root) if data_path_root else ""
+        temperature = str(getattr(data_model, "temperature", "") or "current")
+
+        export_folder = save_root
+        if sample_type:
+            export_folder = os.path.join(export_folder, sample_type)
+        if sample_name:
+            export_folder = os.path.join(export_folder, sample_name)
+
+        if sample_name:
+            # Use _standalone_hkl suffix so the loader recognizes it as standalone without creating a new one
+            file_name = f"{sample_name}_{temperature}_standalone_hkl.nxs"
+        else:
+            file_name = f"current_{temperature}_standalone_hkl.nxs"
+
+        return os.path.join(export_folder, file_name)
+
+    def _writeStandaloneNXdata(self, export_path: str, nxdata: NXdata, progress_dialog: QProgressDialog | None = None):
+        import h5py
+
+        os.makedirs(os.path.dirname(os.path.abspath(export_path)) or ".", exist_ok=True)
+
+        def _normalize_name(name):
+            if isinstance(name, bytes):
+                return name.decode("utf-8", errors="ignore")
+            return str(name)
+
+        axes_attr = nxdata.attrs.get("axes", ())
+        axis_names = [_normalize_name(axes_attr)] if isinstance(axes_attr, str) else [_normalize_name(name) for name in list(axes_attr)]
+        signal_name = nxdata.attrs.get("signal", None)
+        if not signal_name:
+            signal_name = getattr(getattr(nxdata, "nxsignal", None), "nxname", None) or "data"
+        signal_name = _normalize_name(signal_name)
+
+        total_steps = max(1, len(axis_names) + 1)
+        step = 0
+
+        with h5py.File(export_path, "w") as nexus_file:
+            entry = nexus_file.create_group("entry")
+            entry.attrs["NX_class"] = "NXentry"
+            entry.attrs["default"] = "transform"
+
+            transform_group = entry.create_group("transform")
+            transform_group.attrs["NX_class"] = "NXdata"
+            transform_group.attrs["signal"] = signal_name
+            if len(axis_names) == 1:
+                transform_group.attrs["axes"] = axis_names[0]
+            else:
+                transform_group.attrs["axes"] = np.array(axis_names, dtype="S")
+
+            if hasattr(nxdata, "nxtitle") and nxdata.nxtitle:
+                transform_group.attrs["title"] = nxdata.nxtitle
+
+            # Get signal shape for axis truncation
+            signal_data = np.asarray(nxdata[signal_name])
+            signal_shape = signal_data.shape
+
+            # Write axis datasets, truncating to match signal dimensions
+            for axis_idx, axis_name in enumerate(axis_names):
+                if progress_dialog and progress_dialog.wasCanceled():
+                    return
+                
+                axis_raw = np.asarray(nxdata[axis_name])
+                # Truncate axis to match signal dimension
+                if axis_idx < len(signal_shape):
+                    expected_len = signal_shape[axis_idx]
+                    if axis_raw.size > expected_len:
+                        axis_raw = axis_raw[:expected_len]
+                
+                axis_dataset = transform_group.create_dataset(axis_name, data=axis_raw)
+                for attr_name, attr_value in nxdata[axis_name].attrs.items():
+                    axis_dataset.attrs[attr_name] = attr_value
+
+                step += 1
+                if progress_dialog:
+                    progress = int(step / total_steps * 100)
+                    progress_dialog.setLabelText(f"Saving axis: {axis_name}")
+                    progress_dialog.setValue(progress)
+                    QApplication.processEvents()
+
+            # Write signal dataset
+            if progress_dialog and progress_dialog.wasCanceled():
+                return
+            signal_dataset = transform_group.create_dataset(signal_name, data=np.asarray(nxdata[signal_name]))
+            for attr_name, attr_value in nxdata[signal_name].attrs.items():
+                signal_dataset.attrs[attr_name] = attr_value
+
+            step += 1
+            if progress_dialog:
+                progress_dialog.setLabelText(f"Saving signal: {signal_name}")
+                progress_dialog.setValue(100)
+                QApplication.processEvents()
+
+    def downloadCurrentDataAsNxs(self):
+        print("getting current data now")
+        current_data = self._getActivePlotData()
+        if current_data is None:
+            print("No current data available to export.")
+            return
+        print("Retrieved data, opening file dialog")
+
+        save_root = QFileDialog.getExistingDirectory(
+            self,
+            "Select folder to save current data",
+            self.last_directory or str(self.settings.value("lastDirectory", "") or ""),
+            QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not save_root:
+            return
+
+        export_path = self._buildExportPath(save_root)
+
+        progress = QProgressDialog("Saving current data...", "Cancel", 0, 100, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setAutoClose(True)
+        progress.setValue(0)
+
+        # perform write with progress updates; allow cancellation
+        self._writeStandaloneNXdata(export_path, current_data, progress_dialog=progress)
+        progress.setValue(100)
+
+        self.last_directory = save_root
+        self.settings.setValue("lastDirectory", save_root)
+        print(f"Saved current data to: {export_path}")
             
     def applySkewAngle(self, angle):
         print(f"Applying skew angle: {angle}")
