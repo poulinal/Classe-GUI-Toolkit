@@ -94,12 +94,19 @@ class PlottedGraphWidget(QWidget):
                 pass
             self.colorbar = None
 
+        # Colorbar.remove() detaches self.cax from the figure, leaving it
+        # without a figure reference. Re-create it via the divider so the
+        # next fig.colorbar(cax=self.cax) call has a valid, attached axes.
         if getattr(self, "cax", None) is not None:
             try:
-                self.cax.cla()
+                self.cax.remove()
             except Exception:
                 pass
+        try:
+            self.cax = self._cbar_divider.append_axes("right", size="4.5%", pad=0.08)
             self.cax.set_visible(False)
+        except Exception:
+            self.cax = None
 
     def _attach_colorbar(self):
         """Attach a colorbar if the figure/axes are in a valid state."""
@@ -205,6 +212,19 @@ class PlottedGraphWidget(QWidget):
         if autoscale:
             try:
                 self.quadmesh.autoscale()
+            except Exception:
+                pass
+
+        # Fit axes view to the new mesh extent — without this, a smaller
+        # trimmed dataset replots inside the previous (larger) x/y limits.
+        # relim() ignores collections, so derive limits from the mesh coords.
+        if autoscale:
+            try:
+                coords = self.quadmesh.get_coordinates()
+                x_vals = coords[..., 0]
+                y_vals = coords[..., 1]
+                self.ax_main.set_xlim(float(x_vals.min()), float(x_vals.max()))
+                self.ax_main.set_ylim(float(y_vals.min()), float(y_vals.max()))
             except Exception:
                 pass
 

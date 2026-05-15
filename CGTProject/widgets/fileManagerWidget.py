@@ -185,6 +185,7 @@ class FileManagerWidget(QWidget):
         # metadata_files = self.getAllSelectedSamplePaths()
         # self.pathSelected.emit((self.getSelectedSamplePath(), metadata_files))
         self.submitOptions.emit()
+        self._setCollapsed(True)
         
     def setFileOptionsEnabled(self, enabled: bool):
         """Enables or disables file options widgets

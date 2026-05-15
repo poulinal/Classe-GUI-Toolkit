@@ -81,14 +81,14 @@ class IAnalysisPage(QWidget):
         self.layout.addLayout(self.plotControlsLayout, 4, 0, 1, 2)
 
         self.additionalOptionsCombo = QComboBox()
-        self.additionalOptionsCombo.addItems(["--", "Change colormap", "Skew Angle", "Download current data (.nxs)"])
+        self.additionalOptionsCombo.addItems(["Select Additional Tools...", "Change colormap", "Skew Angle", "Download current data (.nxs)"])
         self.additionalOptionsCombo.setEnabled(True)
         self.additionalOptionsCombo.currentIndexChanged.connect(self.onAdditionalOptionChanged)
-        # self.layout.addWidget(self.additionalOptionsCombo, 5, 0, 1, 2)
+        self.layout.addWidget(self.additionalOptionsCombo, 6, 0, 1, 3)
 
         self.additionalOptionsLayout = QVBoxLayout()
-        self.additionalOptionsLayout.addWidget(self.additionalOptionsCombo)
-        self.layout.addLayout(self.additionalOptionsLayout, 6, 0, 1, 3)
+        # self.additionalOptionsLayout.addWidget(self.additionalOptionsCombo)
+        self.layout.addLayout(self.additionalOptionsLayout, 3, 3, 1, 2)
 
         self.setLayout(self.layout)
         self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
@@ -187,7 +187,7 @@ class IAnalysisPage(QWidget):
         print("test")
         print(selected_option == "Download current data (.nxs)")
         print(f"Additional option selected: {selected_option}")
-        if selected_option == "--":
+        if selected_option == "Select Additional Tools...":
             self._clearAdditionalOptionsLayout()
         elif selected_option == "Change colormap":
             changeColormap = QComboBox()
