@@ -1,12 +1,20 @@
 # AP 2026
+import sys
+import os
+import traceback
+
+import matplotlib
+
+matplotlib.use("Qt5Agg")
+
 from CGTProject.pages.mainMenuPage import MainWindow
 from CGTProject.notifications.dialog import show_crash_dialog
 from CGTProject.utilities.memoryLogger import initialize_monitor, cleanup_monitor
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt, QCoreApplication
-import sys
-import os
-import traceback
+from PyQt5.QtCore import Qt, QCoreApplication, QTimer
+
+QCoreApplication.setAttribute(Qt.AA_UseSoftwareOpenGL)
+QCoreApplication.setAttribute(Qt.AA_DisableHighDpiScaling)
 
 
 def _configure_qt_for_x11_remote_rendering():
@@ -35,6 +43,8 @@ def main() -> int:
         app = QApplication(sys.argv)
         window = MainWindow()
         window.show()
+        QTimer.singleShot(0, window.update)
+        QTimer.singleShot(0, window.repaint)
         return app.exec_()
     except Exception:
         # Show fatal error details before terminating the app.

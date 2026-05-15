@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         self.process_page = ProcessDataPage(settings)
         self.analyze_page = MainAnalysisPage(settings)
         # self.deltapdf_page = DeltaPDFPage(settings)
-        self.banner_manager = BannerManager(self, position=BannerManager.TOP_CENTER)
+        self.banner_manager = BannerManager(self, position=BannerManager.TOP_RIGHT)
         self.analyze_page.banner_manager = self.banner_manager
         self.analyze_page.openExtractedData.connect(lambda extractedData: self.open_line_cut(extractedData))
         self.analyze_page.openDeltaPDF.connect(lambda dpdf: self.open_delta_pdf(settings, dpdf))

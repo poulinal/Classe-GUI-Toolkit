@@ -1,4 +1,5 @@
 #AP 2026
+import json
 import numpy as np
 from nexusformat.nexus import NXdata, NeXusError, nxsetmemory, NXfield
 def centers(axis, dimlen):
@@ -202,9 +203,49 @@ def trimNXdataToAxisSegments(nxdata: NXdata, axis_index: int, segments: list[tup
         trimmed_signal = np.concatenate(trimmed_signal_chunks, axis=axis_index)
         trimmed_axis = np.concatenate(trimmed_axis_chunks, axis=0)
 
+    segment_ranges: list[str] = []
+    for start_index, end_index in normalized_segments:
+        start_value = axis_data[start_index]
+        end_value = axis_data[end_index]
+        segment_ranges.append(f"{start_value:.6g}-{end_value:.6g}")
+
     trimmed_nxdata = NXdata()
     trimmed_nxdata.attrs['axes'] = axis_name if len(axis_names) == 1 else tuple(axis_names)
     trimmed_nxdata.attrs['signal'] = signal_name
+    trimmed_nxdata.attrs['trim_axis_name'] = axis_name
+    if axis_name.lower().startswith("q") and len(axis_name) > 1:
+        axis_label = axis_name[1:].upper()
+    else:
+        axis_label = axis_name.upper()
+    trimmed_nxdata.attrs['trim_axis_label'] = axis_label
+    trimmed_nxdata.attrs['trim_ranges'] = ";".join(segment_ranges)
+
+    existing_history = nxdata.attrs.get("trim_history_json", "")
+    trim_history: list[dict[str, object]] = []
+    if existing_history:
+        try:
+            parsed_history = json.loads(str(existing_history))
+            if isinstance(parsed_history, list):
+                trim_history = [entry for entry in parsed_history if isinstance(entry, dict)]
+        except Exception:
+            trim_history = []
+
+    new_entry = {
+        "axis_name": axis_name,
+        "axis_label": axis_label,
+        "ranges": [
+            {
+                "start": float(axis_data[start_index]),
+                "end": float(axis_data[end_index]),
+            }
+            for start_index, end_index in normalized_segments
+        ],
+    }
+
+    trim_history = [entry for entry in trim_history if entry.get("axis_label") != axis_label]
+    trim_history.append(new_entry)
+    trim_history.sort(key=lambda entry: str(entry.get("axis_label", "")))
+    trimmed_nxdata.attrs['trim_history_json'] = json.dumps(trim_history)
 
     for idx, name in enumerate(axis_names):
         if idx == axis_index:

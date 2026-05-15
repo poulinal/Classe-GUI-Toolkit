@@ -20,9 +20,19 @@ class DiffuseDataModel(DataModel):
         super().__init__()
         self.dpdf = dpdf
         self.HKLPlane = HKLPlaneEnum.H_K_Plane
+        self.temperature = str(getattr(dpdf, "source_temperature", "") or "current")
+        self.dataPathRoot = str(getattr(dpdf, "source_data_path_root", "") or "")
         
     def getCurrentData(self) -> Optional[NXdata]:
-        return self.dpdf.fft #self.dic_temp_to_data.get(self.temperature, None)
+        if self.dpdf is None:
+            return None
+
+        fft_data = getattr(self.dpdf, "fft", None)
+        if fft_data is not None:
+            return fft_data
+
+        # Fall back to the source data if the FFT hasn't been materialized yet.
+        return getattr(self.dpdf, "data", None)
 
     def setData(self, data):
         self.dpdf = data
@@ -32,7 +42,7 @@ class DiffuseDataModel(DataModel):
         pass
 
     def dataIsValid(self):
-        return self.dpdf is not None and getattr(self.dpdf, "fft", None) is not None
+        return self.getCurrentData() is not None
     
     # self.page_title.setText("Delta PDF Analysis")
         # plot_slice(dpdf.fft[:,:,0.0]/1e3, cmap='seismic',

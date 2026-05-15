@@ -1,6 +1,7 @@
 # AP 2026
 from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QScrollArea, QProgressBar, QApplication
-from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QSignalBlocker
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QSignalBlocker, QTimer
+import os
 
 import numpy as np
 
@@ -17,7 +18,7 @@ from CGTProject.pages.iAnalysisPage import IAnalysisPage
 from CGTProject.utilities.NXDataHandler import trimNXdataToAxisSegments
 
 from nxs_analysis_tools.datareduction import load_transform
-from nexusformat.nexus import NXdata
+from nexusformat.nexus import NXdata, nxload
 from nxs_analysis_tools.pairdistribution import DeltaPDF
 
 
@@ -96,13 +97,11 @@ class MainAnalysisPage(IAnalysisPage):
     openDeltaPDF = pyqtSignal(DeltaPDF)
     
     def __init__(self, settings : QSettings):
-        self.dataModel: TemperatureDaskDataModel | TemperatureDataModel | None = None
-        self._trimmed_data: NXdata | None = None
+        super().__init__(settings)
+        self.extractedData = None
         self._trim_axis_index: int = 0
         self._trim_segment_widgets: list[_InlineTrimSegmentWidget] = []
         self._trim_ui_initialized: bool = False
-        super().__init__(settings)
-        self.extractedData = None
         
         self.initAdditionalUI()
 
@@ -150,8 +149,8 @@ class MainAnalysisPage(IAnalysisPage):
         self.loadProgressBar.setVisible(False)
         self.layout.addWidget(self.loadProgressBar, 1, 3, 1, 2)
 
-        self.back_btn = QPushButton("← Back to Main Menu")
-        self.layout.addWidget(self.back_btn, 6, 0, 1, 3)
+        # self.back_btn = QPushButton("← Back to Main Menu")
+        # self.layout.addWidget(self.back_btn, 6, 0, 1, 3)
 
         self.plotted_graph_widget.lineCutModeActivated.connect(self.onLineCutModeActivated)
         self.plotted_graph_widget.openDeltaPDFOptionsDialogue.connect(self.onOpenDeltaPDFOptionsDialogue)
@@ -202,9 +201,6 @@ class MainAnalysisPage(IAnalysisPage):
         
         # self.loadData(filePathTuple)
         self.loadTemperature(filePathTuple)
-
-    def _getActivePlotData(self):
-        return self._trimmed_data if self._trimmed_data is not None else super()._getActivePlotData()
         
     def loadTemperature(self, filePathTuple : tuple[str, list]):
         # Placeholder for temperature loading logic
@@ -216,25 +212,61 @@ class MainAnalysisPage(IAnalysisPage):
         self.dataModel = TemperatureDaskDataModel(filePathTuple)
         self.dataModel.setIndex(self.plotSliderWidget.value())
         
-        self.file_manager_widget.populateTemperatureCombo(self.dataModel.getTemperatureValues())
+        if hasattr(self.dataModel, "getTemperatureDisplayEntries"):
+            self.file_manager_widget.populateTemperatureCombo(self.dataModel.getTemperatureDisplayEntries())
+        else:
+            self.file_manager_widget.populateTemperatureCombo(self.dataModel.getTemperatureValues())
         self.file_manager_widget.setFileOptionsEnabled(True)
         
             
     def onFileOptionsSubmit(self):
         print(f"File Options Widget Submitted changed: {self.file_manager_widget.getTemperatureComboValue()}")
         self._notify_info("Applying file options and loading data")
+
+        selected_metadata_path = self.file_manager_widget.getTemperatureComboValue()
+        if not os.path.isabs(selected_metadata_path) and hasattr(self.dataModel, "build_metadata_path"):
+            metadata_path = self.dataModel.build_metadata_path(selected_metadata_path)
+            if metadata_path:
+                selected_metadata_path = metadata_path
+
+        # If the selected file is a saved DeltaPDF export, open it directly in DeltaPDFPage.
+        if selected_metadata_path and "deltapdf" in os.path.basename(selected_metadata_path).lower():
+            try:
+                fft_data = nxload(selected_metadata_path).entry.transform
+                dpdf = DeltaPDF()
+                dpdf.fft = fft_data
+                dpdf.source_temperature = self._extractTemperatureFromPath(selected_metadata_path)
+                dpdf.source_data_path_root = getattr(self.dataModel, "dataPathRoot", "")
+                try:
+                    dpdf.fft.attrs["source_temperature"] = dpdf.source_temperature
+                    dpdf.fft.attrs["source_data_path_root"] = getattr(self.dataModel, "dataPathRoot", "")
+                except Exception:
+                    pass
+                dpdf.build_options = {}
+                self.openDeltaPDF.emit(dpdf)
+                self._notify_success(f"Opened DeltaPDF file: {os.path.basename(metadata_path)}")
+                return
+            except Exception as exc:
+                self._notify_error(f"Failed to open DeltaPDF file: {exc}")
+                return
+
         try:
             self._setLoadProgress(0, "Loading data")
-            self.dataModel.setTemperature(
-                self.file_manager_widget.getTemperatureComboValue(),
-                progress_callback=self._setLoadProgress,
-            )
+            if hasattr(self.dataModel, "setMetadataPath"):
+                self.dataModel.setMetadataPath(
+                    selected_metadata_path,
+                    progress_callback=self._setLoadProgress,
+                )
+            else:
+                self.dataModel.setTemperature(
+                    self._extractTemperatureFromPath(selected_metadata_path),
+                    progress_callback=self._setLoadProgress,
+                )
             self.dataModel.setHKLPlane(self.file_manager_widget.getHKLPlaneComboValue())
         
-            self._setPlotSliderMaximum(self.dataModel.getMaxDepth())
+            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
             self.plotSliderWidget.setEnabled(True)
             self._resetTrimState()
-            self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
 
             # self.preLoadPlotsOption.setEnabled(True)
 
@@ -414,7 +446,7 @@ class MainAnalysisPage(IAnalysisPage):
             slice_axis_index = self.dataModel.getSliceAxisIndex()
             max_depth = len(np.asarray(self.dataModel.getCurrentData().nxaxes[slice_axis_index])) - 1
             max_depth = max(0, max_depth)
-            self._setPlotSliderMaximum(max_depth)
+            self.plotSliderWidget.setMaximum(max_depth)
             if self.plotSliderWidget.value() > max_depth:
                 self.plotSliderWidget.setValue(max_depth)
                 
@@ -436,9 +468,8 @@ class MainAnalysisPage(IAnalysisPage):
                     self.file_manager_widget.getTemperatureComboValue(),
                     progress_callback=self._setLoadProgress,
                 )
-            self._setPlotSliderMaximum(self.dataModel.getMaxDepth())
+            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
             self.plotSliderWidget.setEnabled(True)
-            self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
             self.redrawPlot()
             self._notify_success("Full dataset reloaded")
         finally:
@@ -487,6 +518,18 @@ class MainAnalysisPage(IAnalysisPage):
         self._trim_axis_index = self.trimAxisCombo.currentIndex() if self.trimAxisCombo.count() else 0
         self._trim_ui_initialized = True
         return trim_root
+
+    def _extractTemperatureFromPath(self, metadata_path: str) -> str:
+        base_name = os.path.basename(metadata_path)
+        for suffix in ("_standalone_hkl.nxs", "_standalone_native.nxs", ".nxs"):
+            if base_name.endswith(suffix):
+                base_name = base_name[: -len(suffix)]
+                break
+
+        for token in reversed(base_name.split("_")):
+            if token.replace(".", "", 1).isdigit():
+                return token
+        return "current"
             
                 
     def onSubmitLineCut(self, verticle : bool):
@@ -512,26 +555,15 @@ class MainAnalysisPage(IAnalysisPage):
     def onAdditionalOptionChanged(self, index):
         selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
         print(f"Additional option selected: {selected_option}")
-
-        # Handle only the subclass-specific options; delegate other choices to base class
-        if selected_option == "Trim Data":
-            self._clearAdditionalOptionsWidgets()
-            self.additionalOptionsLayout.addWidget(self._buildTrimAdditionalOptions())
-            return
-
         if selected_option == "--":
             self._clearAdditionalOptionsWidgets()
-            return
-
-        if selected_option == "Change colormap":
+        elif selected_option == "Change colormap":
             changeColormap = QComboBox()
             changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
             changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
             self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(changeColormap)
-            return
-
-        if selected_option == "Skew Angle":
+        elif selected_option == "Skew Angle":
             skewAngleLabel = QLabel("Skew Angle:")
             skewAngleSlider = QSlider(Qt.Horizontal)
             skewAngleSlider.setMinimum(-45)
@@ -539,18 +571,16 @@ class MainAnalysisPage(IAnalysisPage):
             skewAngleSlider.setValue(0)
             skewAngleSlider.setTickPosition(QSlider.TicksBelow)
             skewAngleSlider.setTickInterval(1)
+            #on release of slider 
             skewAngleSlider.sliderReleased.connect(lambda: self.applySkewAngle(skewAngleSlider.value()))
             self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(skewAngleLabel)
             self.additionalOptionsLayout.addWidget(skewAngleSlider)
-            return
-
-        # For any other option (including the download action added in the base class), defer to IAnalysisPage
-        try:
+        elif selected_option == "Trim Data":
+            self._clearAdditionalOptionsWidgets()
+            self.additionalOptionsLayout.addWidget(self._buildTrimAdditionalOptions())
+        else:
             super().onAdditionalOptionChanged(index)
-        except Exception:
-            # fallback: call base method with current index
-            IAnalysisPage.onAdditionalOptionChanged(self, index)
             
             
     def onOpenDeltaPDFOptionsDialogue(self):
@@ -567,6 +597,14 @@ class MainAnalysisPage(IAnalysisPage):
             self._notify_success("Delta PDF options accepted")
             # Retrieve options from the dialog
             delta_pdf = deltaPDFOptionsDialog.getDeltaPDF()
+            delta_pdf.source_temperature = getattr(self.dataModel, "temperature", "")
+            delta_pdf.source_data_path_root = getattr(self.dataModel, "dataPathRoot", "")
+            delta_pdf.build_options = deltaPDFOptionsDialog.getBuildOptions()
+            try:
+                delta_pdf.fft.attrs["source_temperature"] = getattr(self.dataModel, "temperature", "")
+                delta_pdf.fft.attrs["source_data_path_root"] = getattr(self.dataModel, "dataPathRoot", "")
+            except Exception:
+                pass
             # print(f"Delta PDF options: {delta_pdf_options}")
             # Placeholder for applying delta PDF options
             self.openDeltaPDF.emit(delta_pdf)

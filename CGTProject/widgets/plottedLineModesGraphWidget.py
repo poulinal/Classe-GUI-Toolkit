@@ -12,8 +12,8 @@ class PlottedLineModesGraphWidget(PlottedGraphWidget):
         super().__init__(parent)
         self.lineCutMode : LineCutModeEnum = None
         
-        self.initVerticleLineCutTool()
-        self.initHorizontalLineCutTool()
+        # self.initVerticleLineCutTool()
+        # self.initHorizontalLineCutTool()
         self.initVerticleHorizontalLineCutTool()
         self.initDeltaPDFTool()
         

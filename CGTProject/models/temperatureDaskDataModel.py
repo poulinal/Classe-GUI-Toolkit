@@ -81,6 +81,7 @@ class TemperatureDaskDataModel(DataModel):
         self.dataPathRoot, self.dataMetadata = dataPaths
 
         self.temperature: str = ""
+        self.currentMetadataPath: str = ""
         self._chunks = chunks
 
         # Lightweight index: temp -> .nxs path
@@ -100,14 +101,68 @@ class TemperatureDaskDataModel(DataModel):
         self._nx_cache.clear()
 
         for metadata in self.dataMetadata:
-            temp_value = metadata.split("_")[-1].split(".nxs")[0]
-            #if temp_value str is an integer
-            if temp_value.isdigit():
+            temp_value = self._extract_temperature_value(metadata)
+            if temp_value is not None:
                 fullpath = metadata if os.path.isabs(metadata) else os.path.join(self.dataPathRoot, metadata)
                 self.dic_temp_to_path[temp_value] = fullpath
 
+    def _extract_temperature_value(self, metadata_path: str) -> Optional[str]:
+        base_name = os.path.basename(metadata_path)
+        if base_name.endswith("_standalone_hkl.nxs"):
+            base_name = base_name[: -len("_standalone_hkl.nxs")]
+        elif base_name.endswith("_standalone_native.nxs"):
+            base_name = base_name[: -len("_standalone_native.nxs")]
+        elif base_name.endswith(".nxs"):
+            base_name = base_name[:-4]
+
+        for token in reversed(base_name.split("_")):
+            if token.replace(".", "", 1).isdigit():
+                return token
+        return None
+
     def getTemperatureValues(self):
         return list(self.dic_temp_to_path.keys())
+
+    def getTemperatureDisplayEntries(self) -> list[tuple[str, str]]:
+        display_entries: list[tuple[str, str]] = []
+        for metadata in self.dataMetadata:
+            temp_value = self._extract_temperature_value(metadata)
+            if temp_value is None:
+                continue
+            fullpath = metadata if os.path.isabs(metadata) else os.path.join(self.dataPathRoot, metadata)
+            display_entries.append((self._build_temperature_display_label(fullpath, temp_value), fullpath))
+        return display_entries
+
+    def _build_temperature_display_label(self, metadata_path: str, temperature: str) -> str:
+        base_name = os.path.basename(metadata_path)
+        for suffix in ("_standalone_hkl.nxs", "_standalone_native.nxs", ".nxs"):
+            if base_name.endswith(suffix):
+                base_name = base_name[: -len(suffix)]
+                break
+
+        is_delta_pdf = "deltapdf" in base_name.lower()
+
+        trim_token = None
+        for token in base_name.split("_"):
+            if token.lower().startswith("trim"):
+                trim_token = token[4:]
+                break
+
+        if not trim_token:
+            return f"{temperature} (deltaPDF)" if is_delta_pdf else f"{temperature} (full data)"
+
+        import re
+
+        trim_parts = []
+        for axis_label, range_text in re.findall(r"([HKL])([^HKL_]+)", trim_token):
+            cleaned_range = range_text.strip("+")
+            if cleaned_range:
+                trim_parts.append(f"{axis_label}{cleaned_range}")
+
+        trim_text = "".join(trim_parts) if trim_parts else trim_token
+        if is_delta_pdf:
+            return f"{temperature} (deltaPDF, trim {trim_text})"
+        return f"{temperature} (trim {trim_text})"
 
     def dataIsValid(self):
         return self.getCurrentData() is not None
@@ -211,12 +266,15 @@ class TemperatureDaskDataModel(DataModel):
         if temperatureValue in self.dic_temp_to_path:
             return self.dic_temp_to_path[temperatureValue]
 
+        if os.path.isabs(temperatureValue) and os.path.exists(temperatureValue):
+            return temperatureValue
+
         if not self.dataMetadata:
             return None
 
         for metadata in self.dataMetadata:
             try:
-                temp_value = metadata.split("_")[-1].split(".nxs")[0]
+                temp_value = self._extract_temperature_value(metadata)
             except Exception:
                 temp_value = None
             if temp_value == temperatureValue:
@@ -244,47 +302,32 @@ class TemperatureDaskDataModel(DataModel):
         cache_dir = os.path.dirname(os.path.abspath(cache_path)) or "."
         return os.access(cache_dir, os.W_OK | os.X_OK)
 
-    def setTemperature(self, temperatureValue: str, progress_callback: Callable[[int, str], None] | None = None):
-        metadata_path = self.build_metadata_path(temperatureValue)
-        if not metadata_path:
-            raise ValueError(f"Temperature '{temperatureValue}' not found in metadata index.")
-
-        self.temperature = temperatureValue
-
+    def _load_metadata_path(self, metadata_path: str, *, temperature_value: str, progress_callback: Callable[[int, str], None] | None = None):
         def _report(percent: int, message: str) -> None:
             if progress_callback is not None:
                 progress_callback(max(0, min(100, percent)), message)
 
-        # Load on demand; keep cache small
-        if temperatureValue not in self._nx_cache:
+        self.currentMetadataPath = metadata_path
+        self.temperature = temperature_value
+
+        cache_key = metadata_path
+        if cache_key not in self._nx_cache:
             if self._max_loaded_items == 1:
                 self._nx_cache.clear()
                 gc.collect()
 
-            # IMPORTANT:
-            # This should ideally return NXdata whose NXfield remains HDF5-backed.
-            # Avoid calling nxsignal.nxvalue/nxdata anywhere unless you want the full array.
-            
-            # fast_standalone_nxs_path = os.path.join(os.path.dirname(metadata_path), f"fast_{os.path.basename(metadata_path)}")
-            # if os.path.exists(fast_standalone_nxs_path):
-            #     print(f"Loading from fast standalone .nxs: {fast_standalone_nxs_path}")
-            #     self._nx_cache[temperatureValue] = load_transform_fast(fast_standalone_nxs_path)
-            # else:
-            #     self._nx_cache[temperatureValue] = load_transform_fast(metadata_path)
-            # # self._nx_cache[temperatureValue] = load_transform_npy('/home/apoulin/de-lat-to-4431-b_link/nxrefine/Eu5Sn2As6/sample1/Eu5Sn2As6_300_hkl.npy')
-            # # save_transform_npy(metadata_path)
-            #     save_transform_standalone_nxs(metadata_path)
-            if metadata_path.lower().endswith(".nxs"):
+            mpath_lower = metadata_path.lower()
+            if mpath_lower.endswith("_standalone_hkl.nxs") or mpath_lower.endswith("_standalone_native.nxs"):
+                fast_standalone_nxs_path = metadata_path
+            elif metadata_path.lower().endswith(".nxs"):
                 fast_standalone_nxs_path = metadata_path[:-4] + "_standalone_hkl.nxs"
             else:
                 fast_standalone_nxs_path = metadata_path + "_standalone_hkl.nxs"
 
             if os.path.exists(fast_standalone_nxs_path):
-                # Reuse the cached standalone file when it is already available.
                 _report(10, "Loading cached standalone data")
-                self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+                self._nx_cache[cache_key] = nxload(fast_standalone_nxs_path).entry.transform
             elif self._can_write_standalone_cache(fast_standalone_nxs_path):
-                # Materialize a standalone file (no NXlink/external-file dependencies) in HKL order.
                 print(f"fast load does not exist already, creating: {fast_standalone_nxs_path}")
                 try:
                     _report(5, "Building standalone cache")
@@ -296,42 +339,60 @@ class TemperatureDaskDataModel(DataModel):
                         progress_callback=lambda percent, message: _report(5 + int(percent * 0.9), message),
                     )
                     _report(96, "Loading cached standalone data")
-                    self._nx_cache[temperatureValue] = nxload(fast_standalone_nxs_path).entry.transform
+                    self._nx_cache[cache_key] = nxload(fast_standalone_nxs_path).entry.transform
                 except (PermissionError, OSError) as exc:
-                    print(
-                        f"Could not write standalone cache ({exc}); loading the original NeXus file instead."
-                    )
+                    print(f"Could not write standalone cache ({exc}); loading the original NeXus file instead.")
                     _report(10, "Loading original NeXus data")
-                    self._nx_cache[temperatureValue] = load_transform_fast(metadata_path)
+                    self._nx_cache[cache_key] = load_transform_fast(metadata_path)
             else:
-                print(
-                    "Standalone cache directory is not writable; loading the original NeXus file instead."
-                )
+                print("Standalone cache directory is not writable; loading the original NeXus file instead.")
                 _report(10, "Loading original NeXus data")
-                self._nx_cache[temperatureValue] = load_transform_fast(metadata_path)
+                self._nx_cache[cache_key] = load_transform_fast(metadata_path)
 
-            # New dataset loaded: clear any cached axis arrays.
             self._axis_numpy_cache.clear()
             _report(100, "Data ready")
-            
-            
             self._evict_if_needed()
 
+    def setMetadataPath(self, metadata_path: str, progress_callback: Callable[[int, str], None] | None = None):
+        if not metadata_path:
+            raise ValueError("Metadata path is required.")
+
+        extracted_temperature = self._extract_temperature_value(metadata_path) or "current"
+        if not os.path.isabs(metadata_path):
+            metadata_path = os.path.join(self.dataPathRoot, metadata_path)
+
+        self._load_metadata_path(metadata_path, temperature_value=extracted_temperature, progress_callback=progress_callback)
+
+    def setTemperature(self, temperatureValue: str, progress_callback: Callable[[int, str], None] | None = None):
+        if os.path.isabs(temperatureValue) or temperatureValue.lower().endswith(".nxs"):
+            return self.setMetadataPath(temperatureValue, progress_callback=progress_callback)
+
+        metadata_path = self.build_metadata_path(temperatureValue)
+        if not metadata_path:
+            raise ValueError(f"Temperature '{temperatureValue}' not found in metadata index.")
+        return self._load_metadata_path(metadata_path, temperature_value=temperatureValue, progress_callback=progress_callback)
+
     def getCurrentData(self) -> Optional[NXdata]:
-        return self._nx_cache.get(self.temperature, None)
+        cache_key = self.currentMetadataPath or self.temperature
+        return self._nx_cache.get(cache_key, None)
 
     def replaceCurrentData(self, data: NXdata):
-        if not self.temperature:
-            raise RuntimeError("No active temperature to replace.")
-        self._nx_cache[self.temperature] = data
+        cache_key = self.currentMetadataPath or self.temperature
+        if not cache_key:
+            raise RuntimeError("No active dataset to replace.")
+        self._nx_cache[cache_key] = data
         self._axis_numpy_cache.clear()
 
     def reloadCurrentData(self, progress_callback: Callable[[int, str], None] | None = None):
-        if not self.temperature:
-            raise RuntimeError("No active temperature to reload.")
-        self._nx_cache.pop(self.temperature, None)
+        cache_key = self.currentMetadataPath or self.temperature
+        if not cache_key:
+            raise RuntimeError("No active dataset to reload.")
+        self._nx_cache.pop(cache_key, None)
         self._axis_numpy_cache.clear()
-        self.setTemperature(self.temperature, progress_callback=progress_callback)
+        if self.currentMetadataPath:
+            self.setMetadataPath(self.currentMetadataPath, progress_callback=progress_callback)
+        else:
+            self.setTemperature(self.temperature, progress_callback=progress_callback)
 
     def getView(self) -> LazyNXDataView:
         nx = self.getCurrentData()
@@ -366,8 +427,9 @@ class TemperatureDaskDataModel(DataModel):
         # Placeholder for applying line cut options to the data model
         print(f"Applying line cut options: {line_cut_options} at coords: {coords} verticle: {verticle}")
         scissors = Scissors()
-        scissors.set_data(self._nx_cache[self.temperature])
-        if line_cut_options and self.temperature in self._nx_cache:
+        cache_key = self.currentMetadataPath or self.temperature
+        scissors.set_data(self._nx_cache[cache_key])
+        if line_cut_options and cache_key in self._nx_cache:
             if self.HKLPlane is None:
                 print("HKL Plane not set. Cannot apply line cut options.")
                 return

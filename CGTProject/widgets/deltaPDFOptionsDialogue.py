@@ -495,6 +495,9 @@ class DeltaPDFOptionsWidget(QDialog):
         if result_container["err"]:
             raise RuntimeError(result_container["err"])
         return result_container["dpdf"]
+
+    def getBuildOptions(self) -> dict:
+        return self._collect_options()
     
     def generateMask(self, dpdf):
         mask = None

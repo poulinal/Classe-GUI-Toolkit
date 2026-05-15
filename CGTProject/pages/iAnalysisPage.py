@@ -1,5 +1,6 @@
 # AP 2026
 import os
+import json
 
 from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QFileDialog, QProgressDialog, QApplication
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QTimer
@@ -25,6 +26,7 @@ class IAnalysisPage(QWidget):
     def __init__(self, settings : QSettings):
         super().__init__()
         self.settings = settings
+        self.dataModel: DataModel | None = None
         # Load last directory
         self.last_directory = self.settings.value('lastDirectory', '')
 
@@ -41,7 +43,6 @@ class IAnalysisPage(QWidget):
         
         self.initUI()
         
-        # self.dataModel : TemperatureDataModel = None # Placeholder for temperatureDataModel instance
         self.setupDataModel()
         
     @abstractmethod
@@ -51,7 +52,7 @@ class IAnalysisPage(QWidget):
     def initUI(self):
 
         self.back_btn = QPushButton("← Back to Main Menu")
-        self.layout.addWidget(self.back_btn, 6, 0, 1, 3)
+        self.layout.addWidget(self.back_btn, 10, 0, 1, 3)
 
         self.plotted_graph_widget = PlottedLineModesGraphWidget()
         self.layout.addWidget(self.plotted_graph_widget, 3, 0, 1, 2)
@@ -83,10 +84,11 @@ class IAnalysisPage(QWidget):
         self.additionalOptionsCombo.addItems(["--", "Change colormap", "Skew Angle", "Download current data (.nxs)"])
         self.additionalOptionsCombo.setEnabled(True)
         self.additionalOptionsCombo.currentIndexChanged.connect(self.onAdditionalOptionChanged)
-        self.layout.addWidget(self.additionalOptionsCombo, 2, 2, 1, 1)
+        # self.layout.addWidget(self.additionalOptionsCombo, 5, 0, 1, 2)
 
         self.additionalOptionsLayout = QVBoxLayout()
-        self.layout.addLayout(self.additionalOptionsLayout, 3, 2, 1, 1)
+        self.additionalOptionsLayout.addWidget(self.additionalOptionsCombo)
+        self.layout.addLayout(self.additionalOptionsLayout, 6, 0, 1, 3)
 
         self.setLayout(self.layout)
         self._updatePlotSliderValueLabel(self.plotSliderWidget.value())
@@ -221,7 +223,7 @@ class IAnalysisPage(QWidget):
         data_path_root = str(getattr(data_model, "dataPathRoot", "") or "")
         sample_type = os.path.basename(os.path.dirname(data_path_root)) if data_path_root else ""
         sample_name = os.path.basename(data_path_root) if data_path_root else ""
-        temperature = str(getattr(data_model, "temperature", "") or "current")
+        temperature = self._getExportTemperature()
 
         export_folder = save_root
         if sample_type:
@@ -229,13 +231,82 @@ class IAnalysisPage(QWidget):
         if sample_name:
             export_folder = os.path.join(export_folder, sample_name)
 
-        if sample_name:
-            # Use _standalone_hkl suffix so the loader recognizes it as standalone without creating a new one
-            file_name = f"{sample_name}_{temperature}_standalone_hkl.nxs"
+        # Prefer using the sample type (parent folder) as the exported file prefix
+        if sample_type:
+            file_prefix = sample_type
+        elif sample_name:
+            file_prefix = sample_name
         else:
-            file_name = f"current_{temperature}_standalone_hkl.nxs"
+            file_prefix = "current"
+
+        export_kind = self._getExportNameTag()
+        if export_kind:
+            file_name = f"{file_prefix}_{export_kind}_{temperature}_standalone_hkl.nxs"
+        else:
+            file_name = f"{file_prefix}_{temperature}_standalone_hkl.nxs"
 
         return os.path.join(export_folder, file_name)
+
+    def _getExportNameTag(self) -> str:
+        current_data = self._getActivePlotData()
+        if current_data is None:
+            return ""
+
+        trim_history_json = str(current_data.attrs.get("trim_history_json", "") or "").strip()
+        if trim_history_json:
+            try:
+                trim_history = json.loads(trim_history_json)
+                if isinstance(trim_history, list) and trim_history:
+                    parts = []
+                    for entry in trim_history:
+                        if not isinstance(entry, dict):
+                            continue
+                        axis_label = str(entry.get("axis_label", "") or "").strip().upper()
+                        ranges = entry.get("ranges", [])
+                        if not axis_label or not isinstance(ranges, list):
+                            continue
+                        range_texts = []
+                        for range_entry in ranges:
+                            if not isinstance(range_entry, dict):
+                                continue
+                            start = range_entry.get("start", None)
+                            end = range_entry.get("end", None)
+                            if start is None or end is None:
+                                continue
+                            range_texts.append(f"{float(start):.6g}-{float(end):.6g}")
+                        if range_texts:
+                            parts.append(f"{axis_label}{'+'.join(range_texts)}")
+                    if parts:
+                        return f"trim{''.join(parts[:3])}"
+            except Exception:
+                pass
+
+        trim_axis_name = str(current_data.attrs.get("trim_axis_label", current_data.attrs.get("trim_axis_name", "")) or "").strip()
+        trim_ranges = str(current_data.attrs.get("trim_ranges", "") or "").strip()
+        if not trim_axis_name or not trim_ranges:
+            return ""
+
+        safe_axis_name = trim_axis_name.replace(" ", "")
+        safe_ranges = trim_ranges.replace(" ", "").replace(";", "+")
+        return f"trim{safe_axis_name}{safe_ranges}"
+
+    def _getExportTemperature(self) -> str:
+        current_data = self._getActivePlotData()
+        if current_data is not None:
+            current_temperature = str(current_data.attrs.get("source_temperature", "") or current_data.attrs.get("temperature", "") or "").strip()
+            if current_temperature:
+                return current_temperature
+
+        data_model = getattr(self, "dataModel", None)
+        temperature = str(getattr(data_model, "temperature", "") or "").strip()
+        if temperature:
+            return temperature
+
+        dpdf_temperature = str(getattr(getattr(self, "dpdf", None), "source_temperature", "") or "").strip()
+        if dpdf_temperature:
+            return dpdf_temperature
+
+        return "current"
 
     def _writeStandaloneNXdata(self, export_path: str, nxdata: NXdata, progress_dialog: QProgressDialog | None = None):
         import h5py
@@ -313,6 +384,10 @@ class IAnalysisPage(QWidget):
                 progress_dialog.setValue(100)
                 QApplication.processEvents()
 
+    def _afterSaveCurrentData(self, export_path: str, current_data: NXdata):
+        """Hook for pages that need to emit sidecar files after a successful export."""
+        return
+
     def downloadCurrentDataAsNxs(self):
         print("getting current data now")
         current_data = self._getActivePlotData()
@@ -340,6 +415,8 @@ class IAnalysisPage(QWidget):
         # perform write with progress updates; allow cancellation
         self._writeStandaloneNXdata(export_path, current_data, progress_dialog=progress)
         progress.setValue(100)
+
+        self._afterSaveCurrentData(export_path, current_data)
 
         self.last_directory = save_root
         self.settings.setValue("lastDirectory", save_root)

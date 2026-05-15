@@ -109,21 +109,19 @@ class BannerManager:
         notification.adjustSize()
         width = notification.width()
         height = notification.height()
-        
+
         parent_rect = self.parent_widget.rect()
-        parent_global = self.parent_widget.mapToGlobal(parent_rect.topLeft())
-        
-        # Determine horizontal position
+
         if "center" in self.position:
-            x = parent_global.x() + (parent_rect.width() - width) // 2
+            x = (parent_rect.width() - width) // 2
         elif "right" in self.position:
-            x = parent_global.x() + parent_rect.width() - width - 20
+            x = parent_rect.width() - width - 20
         else:  # left
-            x = parent_global.x() + 20
-        
-        # Start off-screen at the top
-        y = parent_global.y() - height - 10
-        
+            x = 20
+
+        # Start above the parent's top edge so the slide-in animation reads naturally
+        y = -height - 10
+
         return QRect(x, y, width, height)
 
     def _calculate_end_position(self, notification: BannerNotification) -> QRect:
@@ -131,26 +129,23 @@ class BannerManager:
         notification.adjustSize()
         width = notification.width()
         height = notification.height()
-        
+
         parent_rect = self.parent_widget.rect()
-        parent_global = self.parent_widget.mapToGlobal(parent_rect.topLeft())
-        
-        # Determine horizontal position
+
         if "center" in self.position:
-            x = parent_global.x() + (parent_rect.width() - width) // 2
+            x = (parent_rect.width() - width) // 2
         elif "right" in self.position:
-            x = parent_global.x() + parent_rect.width() - width - 20
+            x = parent_rect.width() - width - 20
         else:  # left
-            x = parent_global.x() + 20
-        
-        # Stack notifications vertically
+            x = 20
+
         num_active = len(self.active_notifications)
-        
+
         if "bottom" in self.position:
-            y = parent_global.y() + parent_rect.height() - height - 20 - (num_active * (height + self.offset_y))
+            y = parent_rect.height() - height - 20 - (num_active * (height + self.offset_y))
         else:  # top
-            y = parent_global.y() + 20 + (num_active * (height + self.offset_y))
-        
+            y = 20 + (num_active * (height + self.offset_y))
+
         return QRect(x, y, width, height)
 
     def _remove_notification(self, notification: BannerNotification):

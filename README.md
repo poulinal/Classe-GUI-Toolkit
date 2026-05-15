@@ -38,6 +38,42 @@ run `./CGTProject`
 
 
 
+
+
+# Some common issues:
+When running xquartz/x11 fowarding, the application goes black and only renders after resizing:
+## some potential fixes:
+### run:
+`export QT_XCB_GL_INTEGRATION=none`
+`export QT_X11_NO_MITSHM=1`
+`export MPLBACKEND=Qt5Agg`
+### before
+```python main.py```
+
+
+
+
+# For tests:
+### Install test dependencies
+`pip install -e ".[test]"`
+
+### To run tests:
+#### Run all tests
+`pytest -v`
+#### Run only unit tests
+`pytest -m unit`
+
+#### Run everything except slow tests
+`pytest -m "not slow"`
+
+#### Run unit OR integration tests
+`pytest -m "unit or integration"`
+
+#### Run with verbose output and marker info
+`pytest -v -m unit`
+
+
+
 # More Info Below:
 
 ## Quick Start (No Manual main.py Launch)

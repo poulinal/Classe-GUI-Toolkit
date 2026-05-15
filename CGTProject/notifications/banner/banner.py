@@ -65,7 +65,7 @@ class BannerNotification(QWidget):
         # Create message label
         self.label = QLabel()
         font = QFont()
-        font.setPointSize(13)
+        font.setPointSize(8) #use styles.py to change font
         font.setFamily("-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif")
         self.label.setFont(font)
         self.label.setWordWrap(True)
@@ -79,7 +79,6 @@ class BannerNotification(QWidget):
         layout.addWidget(self.label)
         
         self.setLayout(layout)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         self.setMaximumWidth(400)
         self.setMinimumHeight(50)
@@ -98,7 +97,8 @@ class BannerNotification(QWidget):
         """
         self.setGeometry(start_pos)
         self.show()
-        
+        self.raise_()
+
         self.animation.setStartValue(start_pos)
         self.animation.setEndValue(end_pos)
         self.animation.start()

@@ -49,7 +49,7 @@ def get_stylesheet(style: NotificationStyle) -> str:
         }}
         QLabel {{
             color: {colors['text'].name()};
-            font-size: 14px;
+            font-size: 10px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }}
     """

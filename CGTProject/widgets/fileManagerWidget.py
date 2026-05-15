@@ -196,7 +196,7 @@ class FileManagerWidget(QWidget):
         self.selectHKLPlaneCombo.setEnabled(enabled)
             
     def populateSampleTypeCombo(self, folderPath: str):
-        """Populates the sample selection combo box with sample names from the given folder path
+        """Populates the sample selection combo box with sample names from the given folder path #i.e. like FeSc2S4
 
         Args:
             folderPath (str): Path to the folder containing sample data
@@ -210,7 +210,7 @@ class FileManagerWidget(QWidget):
             print(f"Error populating sample combo: {e}")
             
     def populateSampleCombo(self, sampleTypePath: str):
-        """Populates the sample selection combo box with sample names from the given sample type path
+        """Populates the sample selection combo box with sample names from the given sample type path #i.e. like Sample1
 
         Args:
             sampleTypePath (str): Path to the folder containing specific sample type data
@@ -226,11 +226,16 @@ class FileManagerWidget(QWidget):
         """Populates the temperature selection combo box with temperature values
 
         Args:
-            temperatureValues (list[str]): List of temperature values as strings
+            temperatureValues (list[str] | list[tuple[str, str]]): Display labels or (label, value) pairs
         """
         self.changeTemperatureCombo.clear()
         try:
-            self.changeTemperatureCombo.addItems(temperatureValues)
+            if temperatureValues and isinstance(temperatureValues[0], tuple):
+                for display_text, value in temperatureValues:
+                    self.changeTemperatureCombo.addItem(str(display_text), value)
+            else:
+                for value in temperatureValues:
+                    self.changeTemperatureCombo.addItem(str(value), str(value))
             self._updateSelectionSummary()
         except Exception as e:
             print(f"Error populating temperature combo: {e}")
@@ -278,6 +283,9 @@ class FileManagerWidget(QWidget):
         self.selectionSummaryLineEdit.setText(summary)
             
     def getTemperatureComboValue(self) -> str:
+        current_data = self.changeTemperatureCombo.currentData()
+        if current_data is not None:
+            return str(current_data)
         return self.changeTemperatureCombo.currentText()
     
     def getHKLPlaneComboValue(self) -> str:
