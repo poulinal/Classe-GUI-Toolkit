@@ -1,6 +1,6 @@
 # AP 2026
-from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QScrollArea, QProgressBar, QApplication
-from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QSignalBlocker, QTimer
+from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QScrollArea, QProgressBar, QApplication, QMessageBox
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal
 import os
 
 import numpy as np
@@ -16,81 +16,15 @@ from CGTProject.utilities.HKLPlaneEnum import HKLPlaneEnum
 from CGTProject.widgets.deltaPDFOptionsDialogue import DeltaPDFOptionsWidget
 from CGTProject.pages.iAnalysisPage import IAnalysisPage
 from CGTProject.utilities.NXDataHandler import trimNXdataToAxisSegments
+from CGTProject.utilities.additionalOptionsEnum import AdditionalOptionsEnum
+from CGTProject.widgets.trimDataWidget import TrimDataWidget, _InlineTrimSegmentWidget
+from CGTProject.widgets.binDataWidget import BinDataWidget
+from CGTProject.utilities.dataStorageWarningEnum import DataStorageWarningEnum
+
 
 from nxs_analysis_tools.datareduction import load_transform
 from nexusformat.nexus import NXdata, nxload
 from nxs_analysis_tools.pairdistribution import DeltaPDF
-
-
-class _InlineTrimSegmentWidget(QGroupBox):
-    removed = pyqtSignal(object)
-    changed = pyqtSignal()
-
-    def __init__(self, axis_name: str, axis_values: np.ndarray, segment_number: int, parent=None):
-        super().__init__(parent)
-        self.axis_name = axis_name
-        self.axis_values = np.asarray(axis_values)
-        self.segment_number = segment_number
-
-        self.setTitle(f"Segment {segment_number}")
-        self._buildUi()
-        self._updateLabels()
-
-    def _buildUi(self):
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"Axis: {self.axis_name}"))
-
-        self.startLabel = QLabel("")
-        self.endLabel = QLabel("")
-
-        self.startSlider = QSlider(Qt.Horizontal)
-        self.startSlider.setRange(0, max(0, self.axis_values.size - 1))
-        self.startSlider.setValue(0)
-        self.startSlider.valueChanged.connect(self._onStartChanged)
-        self.startSlider.sliderReleased.connect(self.changed.emit)
-
-        self.endSlider = QSlider(Qt.Horizontal)
-        self.endSlider.setRange(0, max(0, self.axis_values.size - 1))
-        self.endSlider.setValue(max(0, self.axis_values.size - 1))
-        self.endSlider.valueChanged.connect(self._onEndChanged)
-        self.endSlider.sliderReleased.connect(self.changed.emit)
-
-        layout.addWidget(QLabel("Start"))
-        layout.addWidget(self.startSlider)
-        layout.addWidget(self.startLabel)
-        layout.addWidget(QLabel("End"))
-        layout.addWidget(self.endSlider)
-        layout.addWidget(self.endLabel)
-
-        remove_row = QHBoxLayout()
-        remove_row.addStretch(1)
-        remove_btn = QPushButton("Remove Segment")
-        remove_btn.clicked.connect(lambda: self.removed.emit(self))
-        remove_row.addWidget(remove_btn)
-        layout.addLayout(remove_row)
-
-        self.setLayout(layout)
-
-    def _onStartChanged(self, value: int):
-        if value > self.endSlider.value():
-            with QSignalBlocker(self.endSlider):
-                self.endSlider.setValue(value)
-        self._updateLabels()
-
-    def _onEndChanged(self, value: int):
-        if value < self.startSlider.value():
-            with QSignalBlocker(self.startSlider):
-                self.startSlider.setValue(value)
-        self._updateLabels()
-
-    def _updateLabels(self):
-        s = self.startSlider.value()
-        e = self.endSlider.value()
-        self.startLabel.setText(f"Index {s}: {self.axis_values[s]:.6g}")
-        self.endLabel.setText(f"Index {e}: {self.axis_values[e]:.6g}")
-
-    def segment(self) -> tuple[int, int]:
-        return self.startSlider.value(), self.endSlider.value()
 
 class MainAnalysisPage(IAnalysisPage):
     openExtractedData = pyqtSignal(NXdata) # Signal to send extracted line cut data to the line cut page
@@ -147,7 +81,7 @@ class MainAnalysisPage(IAnalysisPage):
         self.loadProgressBar = QProgressBar()
         self.loadProgressBar.setRange(0, 100)
         self.loadProgressBar.setVisible(False)
-        self.layout.addWidget(self.loadProgressBar, 1, 3, 1, 2)
+        self.layout.addWidget(self.loadProgressBar, 12, 0, 1, 3)
 
         # self.back_btn = QPushButton("← Back to Main Menu")
         # self.layout.addWidget(self.back_btn, 6, 0, 1, 3)
@@ -173,9 +107,12 @@ class MainAnalysisPage(IAnalysisPage):
 
         self.layout.addWidget(self.plotSubmitVLineCut, 5, 0, 1, 1)
         self.layout.addWidget(self.plotSubmitHLineCut, 5, 1, 1, 1)
+        
+        self.dataUsageLabel = QLabel() #be wary we're only updating this during redrawPlot, could do via signal to make it easier during mutations of data without redraw.
+        self.layout.addWidget(self.dataUsageLabel, 11, 0, 1, 2)
 
-        if self.additionalOptionsCombo.findText("Trim Data") < 0:
-            self.additionalOptionsCombo.addItem("Trim Data")
+        # if self.additionalOptionsCombo.findText(str(AdditionalOptionsEnum.TRIM_DATA)) < 0:
+        #     self.additionalOptionsCombo.addItem(str(AdditionalOptionsEnum.TRIM_DATA))
 
         self.setLayout(self.layout)
 
@@ -362,6 +299,34 @@ class MainAnalysisPage(IAnalysisPage):
                     else:
                         self.plotted_graph_widget.updateQuadMeshPlot(dataQuadMesh=quad_mesh_data, autoscale=autoscale)
                 self._applyCurrentContrastRamp()
+                
+                self.updateDataStorageLabel()
+                
+    def updateDataStorageLabel(self):
+        dataUsage = self.dataModel.dataStorageUsage # in bytes
+        unit = 'bytes'
+        
+        if dataUsage > DataStorageWarningEnum.CRITICAL:
+            # If data usage is greater than 25 GB, display in red
+            colorWarning = 'color: red;'
+            self.dataUsageLabel.setStyleSheet(colorWarning)
+        elif dataUsage > DataStorageWarningEnum.WARNING:
+            # If data usage is greater than 5 GB, display in orange
+            colorWarning = 'color: orange;'
+            self.dataUsageLabel.setStyleSheet(colorWarning)
+        else:
+            colorWarning = 'color: green;'
+            self.dataUsageLabel.setStyleSheet(colorWarning)
+        
+        if dataUsage > 1e6:
+            dataUsageConverted = dataUsage / 1e6
+            unit = 'MB'
+        elif dataUsage > 1e9:
+            dataUsageConverted = dataUsage / 1e9
+            unit = 'GB'
+            
+            
+        self.dataUsageLabel.setText(f"Data Storage Usage: {dataUsageConverted:.2f} {unit}")
 
     def _clearAdditionalOptionsWidgets(self):
         for i in reversed(range(self.additionalOptionsLayout.count())):
@@ -370,154 +335,6 @@ class MainAnalysisPage(IAnalysisPage):
             if widget is not None:
                 self.additionalOptionsLayout.removeWidget(widget)
                 widget.setParent(None)
-
-    def _getTrimSegments(self) -> list[tuple[int, int]]:
-        return sorted(widget.segment() for widget in self._trim_segment_widgets)
-
-    def _trimSegmentsAreValid(self) -> bool:
-        segments = self._getTrimSegments()
-        for prev, cur in zip(segments, segments[1:]):
-            if cur[0] <= prev[1]:
-                return False
-        return True
-
-    def _renumberTrimSegments(self):
-        for idx, widget in enumerate(self._trim_segment_widgets, start=1):
-            widget.segment_number = idx
-            widget.setTitle(f"Segment {idx}")
-
-    def _onTrimAxisChanged(self, index: int):
-        self._trim_axis_index = index
-        self._clearTrimSegments()
-
-    def _clearTrimSegments(self):
-        if not hasattr(self, 'trimSegmentsLayout'):
-            return
-        for widget in self._trim_segment_widgets:
-            widget.setParent(None)
-        self._trim_segment_widgets = []
-
-    def _onRemoveTrimSegment(self, widget: _InlineTrimSegmentWidget):
-        if widget in self._trim_segment_widgets:
-            self._trim_segment_widgets.remove(widget)
-            widget.setParent(None)
-            self._renumberTrimSegments()
-
-    def _addTrimSegment(self):
-        base_data = self.dataModel.getCurrentData()
-        if base_data is None:
-            return
-
-        axes_attr = base_data.attrs['axes']
-        axis_names = [axes_attr] if isinstance(axes_attr, str) else list(axes_attr)
-        axis_name = axis_names[self._trim_axis_index]
-        axis_values = np.asarray(base_data[axis_name])
-        if axis_values.size == 0:
-            return
-
-        segment_widget = _InlineTrimSegmentWidget(axis_name, axis_values, len(self._trim_segment_widgets) + 1, self)
-        segment_widget.removed.connect(self._onRemoveTrimSegment)
-        segment_widget.changed.connect(lambda: None)
-        self._trim_segment_widgets.append(segment_widget)
-        self.trimSegmentsLayout.insertWidget(self.trimSegmentsLayout.count() - 1, segment_widget)
-
-    def _applyTrimSegments(self):
-        print("applying trim segments")
-        self._notify_info("Starting trim operation")
-        try:
-            self._setLoadProgress(0, "Trimming data")
-            base_data = self.dataModel.getCurrentData()
-            if base_data is None:
-                return
-            if not self._trim_segment_widgets:
-                return
-            if not self._trimSegmentsAreValid():
-                print("Trim segments cannot overlap.")
-                self._notify_warning("Trim segments cannot overlap.")
-                return
-
-            self._setLoadProgress(25, "Processing segments")
-            trimmed_data = trimNXdataToAxisSegments(base_data, self._trim_axis_index, self._getTrimSegments())
-            self._setLoadProgress(75, "Applying trimmed data")
-            self.dataModel.replaceCurrentData(trimmed_data)
-
-            # Keep slider bounds consistent with the active dataset.
-            self._setLoadProgress(85, "Updating display")
-            slice_axis_index = self.dataModel.getSliceAxisIndex()
-            max_depth = len(np.asarray(self.dataModel.getCurrentData().nxaxes[slice_axis_index])) - 1
-            max_depth = max(0, max_depth)
-            self.plotSliderWidget.setMaximum(max_depth)
-            if self.plotSliderWidget.value() > max_depth:
-                self.plotSliderWidget.setValue(max_depth)
-                
-            print("finished applying trim segments")
-            self._notify_success("Finished applying trim segments")
-
-            self.redrawPlot()
-        finally:
-            self._finishLoadProgress()
-
-    def _returnToFullDataset(self):
-        self._notify_info("Reloading full dataset")
-        try:
-            self._setLoadProgress(0, "Reloading full dataset")
-            if hasattr(self.dataModel, "reloadCurrentData"):
-                self.dataModel.reloadCurrentData(progress_callback=self._setLoadProgress)
-            else:
-                self.dataModel.setTemperature(
-                    self.file_manager_widget.getTemperatureComboValue(),
-                    progress_callback=self._setLoadProgress,
-                )
-            self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
-            self.plotSliderWidget.setEnabled(True)
-            self.redrawPlot()
-            self._notify_success("Full dataset reloaded")
-        finally:
-            self._finishLoadProgress()
-
-    def _buildTrimAdditionalOptions(self):
-        base_data = self.dataModel.getCurrentData()
-        trim_root = QWidget()
-        trim_layout = QVBoxLayout(trim_root)
-
-        trim_layout.addWidget(QLabel("Trim current dataset by adding non-overlapping keep ranges."))
-
-        axis_row = QHBoxLayout()
-        axis_row.addWidget(QLabel("Trim axis:"))
-        self.trimAxisCombo = QComboBox()
-        if base_data is not None:
-            axes_attr = base_data.attrs['axes']
-            axis_names = [axes_attr] if isinstance(axes_attr, str) else list(axes_attr)
-            self.trimAxisCombo.addItems([str(name) for name in axis_names])
-        self.trimAxisCombo.currentIndexChanged.connect(self._onTrimAxisChanged)
-        axis_row.addWidget(self.trimAxisCombo)
-        axis_row.addStretch(1)
-        trim_layout.addLayout(axis_row)
-
-        self.trimSegmentsContainer = QWidget()
-        self.trimSegmentsLayout = QVBoxLayout(self.trimSegmentsContainer)
-        self.trimSegmentsLayout.addStretch(1)
-        trim_scroll = QScrollArea()
-        trim_scroll.setWidgetResizable(True)
-        trim_scroll.setWidget(self.trimSegmentsContainer)
-        trim_layout.addWidget(trim_scroll)
-
-        button_row = QHBoxLayout()
-        add_btn = QPushButton("Add Segment")
-        add_btn.clicked.connect(self._addTrimSegment)
-        apply_btn = QPushButton("Submit Trims")
-        apply_btn.clicked.connect(self._applyTrimSegments)
-        return_btn = QPushButton("Return To Full Dataset")
-        return_btn.clicked.connect(self._returnToFullDataset)
-        button_row.addWidget(add_btn)
-        button_row.addWidget(apply_btn)
-        button_row.addWidget(return_btn)
-        button_row.addStretch(1)
-        trim_layout.addLayout(button_row)
-
-        self._trim_axis_index = self.trimAxisCombo.currentIndex() if self.trimAxisCombo.count() else 0
-        self._trim_ui_initialized = True
-        return trim_root
 
     def _extractTemperatureFromPath(self, metadata_path: str) -> str:
         base_name = os.path.basename(metadata_path)
@@ -555,15 +372,15 @@ class MainAnalysisPage(IAnalysisPage):
     def onAdditionalOptionChanged(self, index):
         selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
         print(f"Additional option selected: {selected_option}")
-        if selected_option == "--":
+        if selected_option == AdditionalOptionsEnum.BLANK_STATE.value:
             self._clearAdditionalOptionsWidgets()
-        elif selected_option == "Change colormap":
+        elif selected_option == AdditionalOptionsEnum.CHANGE_COLORMAP.value:
             changeColormap = QComboBox()
             changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
             changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
             self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(changeColormap)
-        elif selected_option == "Skew Angle":
+        elif selected_option == AdditionalOptionsEnum.SKEW_DATA.value:
             skewAngleLabel = QLabel("Skew Angle:")
             skewAngleSlider = QSlider(Qt.Horizontal)
             skewAngleSlider.setMinimum(-45)
@@ -576,15 +393,54 @@ class MainAnalysisPage(IAnalysisPage):
             self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(skewAngleLabel)
             self.additionalOptionsLayout.addWidget(skewAngleSlider)
-        elif selected_option == "Trim Data":
+        elif selected_option == AdditionalOptionsEnum.TRIM_DATA.value:
             self._clearAdditionalOptionsWidgets()
-            self.additionalOptionsLayout.addWidget(self._buildTrimAdditionalOptions())
+            self.trimDataWidget = TrimDataWidget(dataModel = self.dataModel, file_manager_widget = self.file_manager_widget, plot_slider_widget = self.plotSliderWidget, parent=self)
+            self.trimDataWidget.notifyInfo.connect(self._notify_info)
+            self.trimDataWidget.notifySuccess.connect(self._notify_success)
+            self.trimDataWidget.notifyWarning.connect(self._notify_warning)
+            self.trimDataWidget.notifyError.connect(self._notify_error)
+            self.trimDataWidget.progressChanged.connect(self._setLoadProgress)
+            self.trimDataWidget.progressFinished.connect(self._finishLoadProgress)
+            self.trimDataWidget.redrawRequested.connect(self.redrawPlot)
+            self.additionalOptionsLayout.addWidget(self.trimDataWidget._buildTrimAdditionalOptions())
+        elif selected_option == AdditionalOptionsEnum.BIN_DATA.value:
+            self._clearAdditionalOptionsWidgets()
+            self.binDataWidget = BinDataWidget(dataModel = self.dataModel, file_manager_widget = self.file_manager_widget, plot_slider_widget = self.plotSliderWidget, parent=self)
+            self.binDataWidget.notifyInfo.connect(self._notify_info)
+            self.binDataWidget.notifySuccess.connect(self._notify_success)
+            self.binDataWidget.notifyWarning.connect(self._notify_warning)
+            self.binDataWidget.notifyError.connect(self._notify_error)
+            self.binDataWidget.progressChanged.connect(self._setLoadProgress)
+            self.binDataWidget.progressFinished.connect(self._finishLoadProgress)
+            self.binDataWidget.redrawRequested.connect(self.redrawPlot)
+            self.additionalOptionsLayout.addWidget(self.binDataWidget._buildBinAdditionalOptions())
         else:
             super().onAdditionalOptionChanged(index)
             
             
     def onOpenDeltaPDFOptionsDialogue(self):
         print("Opening Delta PDF Options Dialogue...")
+        
+        print("First checking data usage")
+        if self.dataModel.dataStorageUsage > DataStorageWarningEnum.CRITICAL:
+            QMessageBox.warning(
+                self,
+                "Data Storage CRITICAL Warning",
+                "CRITICAL WARNING. Data storage usage is VERY high. It is HIGHLY recommended to reduce data size before attempting a deltaPDF analysis. Please reduce data via trim/binning before proceeding with Delta PDF options."
+            )
+            
+            # return
+        elif self.dataModel.dataStorageUsage > DataStorageWarningEnum.WARNING:
+            QMessageBox.warning(
+                self,
+                "Data Storage Warning",
+                "Data storage usage is high. It is recommended to reduce data size below 1Gb before preforming a deltaPDF. Proceed with caution when opening Delta PDF options."
+            )
+        
+        
+        
+        
         self._notify_info("Opening Delta PDF options")
         current_data = self.dataModel.getCurrentData()
         if current_data is None:

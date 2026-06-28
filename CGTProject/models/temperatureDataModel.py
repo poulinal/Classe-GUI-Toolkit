@@ -70,7 +70,13 @@ class TemperatureDataModel(DataModel):
         return None
             
     def getCurrentData(self) -> Optional[NXdata]:
-        return self.dic_temp_to_data.get(self.temperature, None)
+        value = self.dic_temp_to_data.get(self.temperature, None)
+        return value if isinstance(value, NXdata) else None
+
+    def _iterInMemoryNXdata(self):
+        for value in self.dic_temp_to_data.values():
+            if isinstance(value, NXdata):
+                yield value
 
     def replaceCurrentData(self, data: NXdata):
         if not self.temperature:

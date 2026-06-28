@@ -6,7 +6,9 @@ from nxs_analysis_tools.datareduction import load_transform, plot_slice
 from nxs_analysis_tools import Scissors
 from matplotlib.collections import QuadMesh
 from scipy.ndimage import map_coordinates
-from typing import Optional
+from typing import Optional, Iterator
+
+import numpy as np
 
 from CGTProject.utilities.HKLPlaneEnum import HKLPlaneEnum
 
@@ -21,8 +23,46 @@ class DataModel:
         # self.dic_temp_to_data : dict[str, NXdata] = {} # Temperature str to nxdata (HKL where H is nxaxes[0], K nxaxes[1], L nxaxes[2])
         self.index = 0
         self.HKLPlane : Optional[HKLPlaneEnum] = None
-        
+
         self.initializeAllData()
+
+    def _iterInMemoryNXdata(self) -> Iterator[NXdata]:
+        """Yield NXdata held in memory by this model. Override for multi-dataset models."""
+        current = self.getCurrentData()
+        if current is not None:
+            yield current
+
+    @staticmethod
+    def _nxfield_logical_nbytes(field) -> int:
+        try:
+            shape = tuple(field.shape)
+            itemsize = np.dtype(field.dtype).itemsize
+        except Exception:
+            return 0
+        total = itemsize
+        for size in shape:
+            total *= int(size)
+        return total
+
+    @property
+    def dataStorageUsage(self) -> float:
+        """Bytes held by this model's in-memory NXdata (signal + axes, logical size)."""
+        total = 0
+        for nx in self._iterInMemoryNXdata():
+            if nx is None:
+                continue
+            try:
+                signal_name = nx.attrs['signal']
+                total += self._nxfield_logical_nbytes(nx[signal_name])
+                axes_attr = nx.attrs.get('axes')
+                if axes_attr is None:
+                    continue
+                axis_names = [axes_attr] if isinstance(axes_attr, str) else list(axes_attr)
+                for name in axis_names:
+                    total += self._nxfield_logical_nbytes(nx[name])
+            except Exception:
+                continue
+        return float(total)
     
     @abstractmethod
     def setData(self, data):

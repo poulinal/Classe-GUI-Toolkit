@@ -242,10 +242,13 @@ def trimNXdataToAxisSegments(nxdata: NXdata, axis_index: int, segments: list[tup
         ],
     }
 
-    trim_history = [entry for entry in trim_history if entry.get("axis_label") != axis_label]
     trim_history.append(new_entry)
-    trim_history.sort(key=lambda entry: str(entry.get("axis_label", "")))
     trimmed_nxdata.attrs['trim_history_json'] = json.dumps(trim_history)
+
+    # Propagate bin history so saved filenames retain prior bin ops.
+    for bin_attr in ("bin_history_json", "bin_factors", "bin_reduction"):
+        if bin_attr in nxdata.attrs:
+            trimmed_nxdata.attrs[bin_attr] = nxdata.attrs[bin_attr]
 
     for idx, name in enumerate(axis_names):
         if idx == axis_index:
@@ -256,3 +259,86 @@ def trimNXdataToAxisSegments(nxdata: NXdata, axis_index: int, segments: list[tup
     trimmed_nxdata[signal_name] = NXfield(trimmed_signal, name=signal_name)
 
     return trimmed_nxdata
+
+
+def binNXdataByFactors(nxdata: NXdata, factors: list[int], reduction: str = "mean") -> NXdata:
+    """Coarsen an NXdata object by integer factors along each axis.
+
+    For each axis with factor f > 1, the signal is truncated to a length divisible by f
+    along that axis, then grouped into bins of f and reduced. Axis values are reduced
+    by mean over the same groups so they remain bin centers.
+    """
+    if reduction not in ("mean", "sum"):
+        raise ValueError(f"reduction must be 'mean' or 'sum', got {reduction!r}")
+
+    axes_attr = nxdata.attrs['axes']
+    axis_names = [axes_attr] if isinstance(axes_attr, str) else list(axes_attr)
+    signal_name = nxdata.attrs['signal']
+
+    signal_field = nxdata[signal_name]
+    if len(factors) != signal_field.ndim:
+        raise ValueError(
+            f"factors length ({len(factors)}) must match signal ndim ({signal_field.ndim})"
+        )
+
+    normalized_factors = [max(1, int(f)) for f in factors]
+
+    # Truncate each axis to a length divisible by its factor so the reshape is exact.
+    slicer = []
+    for dim_size, factor in zip(signal_field.shape, normalized_factors):
+        new_len = (dim_size // factor) * factor
+        slicer.append(slice(0, new_len))
+    signal_arr = np.asarray(signal_field[tuple(slicer)])
+
+    # Reshape to expose the bin groups, then reduce.
+    reshape_dims = []
+    reduce_axes = []
+    for axis_idx, (new_size, factor) in enumerate(
+        zip(signal_arr.shape, normalized_factors)
+    ):
+        bins = new_size // factor
+        reshape_dims.extend([bins, factor])
+        reduce_axes.append(len(reshape_dims) - 1)
+    reshaped = signal_arr.reshape(reshape_dims)
+    reducer = np.mean if reduction == "mean" else np.sum
+    binned_signal = reducer(reshaped, axis=tuple(reduce_axes))
+
+    binned_nxdata = NXdata()
+    binned_nxdata.attrs['axes'] = axis_names[0] if len(axis_names) == 1 else tuple(axis_names)
+    binned_nxdata.attrs['signal'] = signal_name
+    binned_nxdata.attrs['bin_factors'] = tuple(normalized_factors)
+    binned_nxdata.attrs['bin_reduction'] = reduction
+
+    # Propagate trim history so saved filenames retain prior trims.
+    for trim_attr in ("trim_history_json", "trim_axis_name", "trim_axis_label", "trim_ranges"):
+        if trim_attr in nxdata.attrs:
+            binned_nxdata.attrs[trim_attr] = nxdata.attrs[trim_attr]
+
+    existing_history = nxdata.attrs.get("bin_history_json", "")
+    bin_history: list[dict[str, object]] = []
+    if existing_history:
+        try:
+            parsed_history = json.loads(str(existing_history))
+            if isinstance(parsed_history, list):
+                bin_history = [entry for entry in parsed_history if isinstance(entry, dict)]
+        except Exception:
+            bin_history = []
+
+    bin_history.append({
+        "factors": [int(f) for f in normalized_factors],
+        "reduction": reduction,
+        "axis_names": list(axis_names),
+    })
+    binned_nxdata.attrs['bin_history_json'] = json.dumps(bin_history)
+
+    for axis_idx, name in enumerate(axis_names):
+        axis_arr = np.asarray(nxdata[name]).astype(np.float64)
+        factor = normalized_factors[axis_idx]
+        new_len = (axis_arr.shape[0] // factor) * factor
+        axis_arr = axis_arr[:new_len]
+        if factor > 1:
+            axis_arr = axis_arr.reshape(-1, factor).mean(axis=1)
+        binned_nxdata[name] = NXfield(axis_arr, name=name)
+
+    binned_nxdata[signal_name] = NXfield(binned_signal, name=signal_name)
+    return binned_nxdata

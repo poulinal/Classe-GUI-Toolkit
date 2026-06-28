@@ -17,6 +17,7 @@ from CGTProject.widgets.lineCutOptionsDialogue import LineCutOptionsDialogue
 from CGTProject.widgets.colorRampSlider import ColorRampWidget
 from CGTProject.utilities.lineCutModeEnum import LineCutModeEnum
 from CGTProject.widgets.deltaPDFOptionsDialogue import DeltaPDFOptionsWidget
+from CGTProject.utilities.additionalOptionsEnum import AdditionalOptionsEnum
 
 from nxs_analysis_tools.datareduction import load_transform
 from nexusformat.nexus import NXdata
@@ -39,7 +40,7 @@ class IAnalysisPage(QWidget):
         # When dragging the slider, avoid expensive autoscale on every frame.
         self._autoscale_next_redraw: bool = True
         
-        self.layout = QGridLayout()
+        self.layout : QGridLayout = QGridLayout()
         
         self.initUI()
         
@@ -81,7 +82,7 @@ class IAnalysisPage(QWidget):
         self.layout.addLayout(self.plotControlsLayout, 4, 0, 1, 2)
 
         self.additionalOptionsCombo = QComboBox()
-        self.additionalOptionsCombo.addItems(["Select Additional Tools...", "Change colormap", "Skew Angle", "Download current data (.nxs)"])
+        self.additionalOptionsCombo.addItems([str(option) for option in AdditionalOptionsEnum])
         self.additionalOptionsCombo.setEnabled(True)
         self.additionalOptionsCombo.currentIndexChanged.connect(self.onAdditionalOptionChanged)
         self.layout.addWidget(self.additionalOptionsCombo, 6, 0, 1, 3)
@@ -184,18 +185,18 @@ class IAnalysisPage(QWidget):
             
     def onAdditionalOptionChanged(self, index):
         selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
-        print("test")
-        print(selected_option == "Download current data (.nxs)")
-        print(f"Additional option selected: {selected_option}")
-        if selected_option == "Select Additional Tools...":
+        # print("test")
+        # print(selected_option == "Download current data (.nxs)")
+        # print(f"Additional option selected: {selected_option}")
+        if selected_option == str(AdditionalOptionsEnum.BLANK_STATE):
             self._clearAdditionalOptionsLayout()
-        elif selected_option == "Change colormap":
+        elif selected_option == str(AdditionalOptionsEnum.CHANGE_COLORMAP):
             changeColormap = QComboBox()
             changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
             changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
             self._clearAdditionalOptionsLayout()
             self.additionalOptionsLayout.addWidget(changeColormap)
-        elif selected_option == "Skew Angle":
+        elif selected_option == str(AdditionalOptionsEnum.SKEW_DATA):
             skewAngleLabel = QLabel("Skew Angle:")
             skewAngleSlider = QSlider(Qt.Horizontal)
             skewAngleSlider.setMinimum(-45)
@@ -207,7 +208,7 @@ class IAnalysisPage(QWidget):
             self._clearAdditionalOptionsLayout()
             self.additionalOptionsLayout.addWidget(skewAngleLabel)
             self.additionalOptionsLayout.addWidget(skewAngleSlider)
-        elif selected_option == "Download current data (.nxs)":
+        elif selected_option == str(AdditionalOptionsEnum.DOWNLOAD_DATA):
             QTimer.singleShot(0, self.downloadCurrentDataAsNxs)
             QTimer.singleShot(0, lambda: self.additionalOptionsCombo.setCurrentIndex(0))
 
@@ -252,6 +253,11 @@ class IAnalysisPage(QWidget):
         if current_data is None:
             return ""
 
+        trim_tag = self._getTrimNameTag(current_data)
+        bin_tag = self._getBinNameTag(current_data)
+        return f"{trim_tag}{bin_tag}"
+
+    def _getTrimNameTag(self, current_data) -> str:
         trim_history_json = str(current_data.attrs.get("trim_history_json", "") or "").strip()
         if trim_history_json:
             try:
@@ -289,6 +295,40 @@ class IAnalysisPage(QWidget):
         safe_axis_name = trim_axis_name.replace(" ", "")
         safe_ranges = trim_ranges.replace(" ", "").replace(";", "+")
         return f"trim{safe_axis_name}{safe_ranges}"
+
+    def _getBinNameTag(self, current_data) -> str:
+        bin_history_json = str(current_data.attrs.get("bin_history_json", "") or "").strip()
+        if bin_history_json:
+            try:
+                bin_history = json.loads(bin_history_json)
+                if isinstance(bin_history, list) and bin_history:
+                    op_texts = []
+                    for entry in bin_history:
+                        if not isinstance(entry, dict):
+                            continue
+                        factors = entry.get("factors", [])
+                        if not isinstance(factors, list) or not factors:
+                            continue
+                        reduction = str(entry.get("reduction", "") or "").strip().lower()
+                        factor_text = "x".join(str(int(f)) for f in factors)
+                        op_texts.append(f"{factor_text}{reduction}" if reduction else factor_text)
+                    if op_texts:
+                        return f"bin{'_'.join(op_texts[:3])}"
+            except Exception:
+                pass
+
+        bin_factors_attr = current_data.attrs.get("bin_factors", None)
+        if bin_factors_attr is None:
+            return ""
+        try:
+            factors = [int(f) for f in (bin_factors_attr if isinstance(bin_factors_attr, (list, tuple)) else [bin_factors_attr])]
+        except Exception:
+            return ""
+        if not factors:
+            return ""
+        reduction = str(current_data.attrs.get("bin_reduction", "") or "").strip().lower()
+        factor_text = "x".join(str(f) for f in factors)
+        return f"bin{factor_text}{reduction}" if reduction else f"bin{factor_text}"
 
     def _getExportTemperature(self) -> str:
         current_data = self._getActivePlotData()
@@ -343,6 +383,20 @@ class IAnalysisPage(QWidget):
 
             if hasattr(nxdata, "nxtitle") and nxdata.nxtitle:
                 transform_group.attrs["title"] = nxdata.nxtitle
+
+            # Persist remaining NXdata-level attrs (trim/bin history, etc.) so
+            # they round-trip on reload and subsequent ops can stack on top.
+            preserved_attrs = {"NX_class", "signal", "axes", "title"}
+            for attr_name, attr_value in nxdata.attrs.items():
+                if attr_name in preserved_attrs:
+                    continue
+                try:
+                    if isinstance(attr_value, (list, tuple)):
+                        transform_group.attrs[attr_name] = np.asarray(attr_value)
+                    else:
+                        transform_group.attrs[attr_name] = attr_value
+                except Exception:
+                    transform_group.attrs[attr_name] = str(attr_value)
 
             # Get signal shape for axis truncation
             signal_data = np.asarray(nxdata[signal_name])

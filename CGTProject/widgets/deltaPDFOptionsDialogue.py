@@ -33,7 +33,7 @@
 '''
 #also allow logscale option for plottedGraphWidget
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QPushButton, QComboBox, QFormLayout, QDialog, QScrollArea, QProgressBar
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QDoubleSpinBox, QLabel, QPushButton, QComboBox, QFormLayout, QDialog, QScrollArea, QProgressBar, QMessageBox
 from PyQt5.QtCore import pyqtSignal, Qt, QObject, QThread
 import numpy as np
 from typing import Optional
@@ -524,14 +524,16 @@ class DeltaPDFOptionsWidget(QDialog):
             print(punch_radius, coeffs, thresh)
             mask = dpdf.generate_bragg_mask(punch_radius=punch_radius, coeffs=coeffs, thresh=thresh)
         if self.intensityMaskCheckBox.isChecked():
-            if self.intensityThreshCheckBox.isChecked():
-                thresh = self.intensityThresh.value()
-            else:
-                thresh = None
-            if self.intensityRadiusCheckBox.isChecked():
-                radius = int(self.intensityRadius.value())
-            else:
-                radius = None
+            if not self.intensityThreshCheckBox.isChecked() or not self.intensityRadiusCheckBox.isChecked():
+                QMessageBox.warning(
+                    self,
+                    "Intensity Mask",
+                    "Intensity mask requires both a threshold and a radius. "
+                    "Enable both checkboxes and set their values before generating the mask.",
+                )
+                return None
+            thresh = self.intensityThresh.value()
+            radius = int(self.intensityRadius.value())
             mask = dpdf.generate_intensity_mask(thresh=thresh, radius=radius)
         if self.customMaskCheckBox.isChecked():
             coords = (self.customMaskXSpin.value(), self.customMaskYSpin.value(), self.customMaskZSpin.value())

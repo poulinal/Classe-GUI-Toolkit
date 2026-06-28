@@ -376,6 +376,11 @@ class TemperatureDaskDataModel(DataModel):
         cache_key = self.currentMetadataPath or self.temperature
         return self._nx_cache.get(cache_key, None)
 
+    def _iterInMemoryNXdata(self):
+        for value in self._nx_cache.values():
+            if value is not None:
+                yield value
+
     def replaceCurrentData(self, data: NXdata):
         cache_key = self.currentMetadataPath or self.temperature
         if not cache_key:
