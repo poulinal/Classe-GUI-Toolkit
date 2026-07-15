@@ -21,6 +21,12 @@ class DeltaPDFPage(MainAnalysisPage):
         self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
         self.plotSliderWidget.setEnabled(True)
         
+        #print the shape of the dpdf data
+        if self.dpdf is not None:
+            print(f"DeltaPDF data shape: {self.dpdf.data.shape}")
+        else:
+            print("DeltaPDF data is None.")
+        
         self.redrawPlot()
         
     def setupDataModel(self):

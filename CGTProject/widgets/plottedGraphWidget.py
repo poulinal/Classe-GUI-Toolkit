@@ -255,15 +255,22 @@ class PlottedGraphWidget(QWidget):
         self.ax_main.legend()
         self.canvas_main.draw()
         
-    def updatePColorMeshPlot(self, data, xlabel: str = "X", ylabel: str = "Y", title: str = "PColorMesh Plot", cmap: str = 'viridis'):
+    def updatePColorMeshPlot(self, data, xlabel: str = "X", ylabel: str = "Y", title: str = "PColorMesh Plot", cmap: str = 'viridis', vmin: float = None, vmax: float = None):
         self.ax_main.clear()
-        self.quadmesh = self.ax_main.pcolormesh(data, shading='auto', cmap=cmap)
+        self.quadmesh = self.ax_main.pcolormesh(data, shading='auto', cmap=cmap, vmin=vmin, vmax=vmax)
         self.ax_main.set_xlabel(xlabel)
         self.ax_main.set_ylabel(ylabel)
         self.ax_main.set_title(title)
         self._reset_colorbar()
         self._attach_colorbar()
         self.canvas_main.draw()
+        
+    def addToPColorMeshPlot(self, data, cmap: str = 'viridis'):
+        # Add new data to the existing pcolormesh plot without clearing the previous data.
+        if data is not None:
+            self.ax_main.imshow(data, cmap=cmap, alpha=0.5, extent=self.ax_main.get_xlim() + self.ax_main.get_ylim(), origin='lower')
+            self.canvas_main.draw()
+
         
     def set_aspect(self, aspect: float):
         self.ax_main.set_aspect(aspect)

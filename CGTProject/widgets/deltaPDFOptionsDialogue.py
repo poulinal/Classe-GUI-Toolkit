@@ -47,6 +47,40 @@ from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
 from CGTProject.widgets.multiPlottingGraphWidget import MultiPlottingGraphWidget
 
 
+def safe_pad(dpdf, padding):
+    """Symmetric zero-padding that tolerates a padding value of 0 on any axis.
+
+    Works around an upstream bug in ``Padder.pad`` where the interior slice is
+    built as ``slice(p, -p)``. When ``p == 0`` that becomes ``slice(0, 0)`` (an
+    empty range, since ``-0 == 0``), collapsing that axis to width 0 and raising
+    a broadcast error. Here the stop index is computed explicitly so a 0-padding
+    axis maps to the full axis. Result is stored on ``dpdf.padded`` (and the
+    padder) exactly as the library would.
+    """
+    padder = dpdf.padder
+    data = padder.data
+    ndim = data.ndim
+    shape = data.nxsignal.nxdata.shape
+    padded_shape = tuple(shape[i] + padding[i] * 2 for i in range(ndim))
+
+    padded = np.zeros(padded_shape)
+    slice_obj = tuple(slice(padding[i], padding[i] + shape[i]) for i in range(ndim))
+    padded[slice_obj] = data.nxsignal.nxdata
+
+    padmaxes = tuple(padder.maxes[i] + padding[i] * padder.steps[i] for i in range(ndim))
+    padded = NXdata(
+        NXfield(padded, name=data.signal),
+        tuple(NXfield(np.linspace(-padmaxes[i], padmaxes[i], padded_shape[i]),
+                      name=data.axes[i])
+              for i in range(ndim)),
+    )
+
+    padder.padding = padding
+    padder.padded = padded
+    dpdf.padded = padded
+    return padded
+
+
 class _DeltaPDFLoadWorker(QObject):
     finished = pyqtSignal(object)  # DeltaPDF
     failed = pyqtSignal(str)
@@ -98,7 +132,8 @@ class _DeltaPDFBuildWorker(QObject):
 
         if opt.get("intensity_mask", False):
             thresh = opt.get("intensity_thresh") if opt.get("intensity_thresh_enabled") else None
-            radius = opt.get("intensity_radius") if opt.get("intensity_radius_enabled") else None
+            # radius indexes range() inside the library, so it must be an int.
+            radius = int(opt.get("intensity_radius")) if opt.get("intensity_radius_enabled") else None
             mask = dpdf.generate_intensity_mask(thresh=thresh, radius=radius)
 
         if opt.get("custom_mask", False):
@@ -141,29 +176,28 @@ class _DeltaPDFBuildWorker(QObject):
 
             taper_kind = opt.get("taper_kind")
             if taper_kind == "Tukey":
-                try:
-                    dpdf.set_tukey_window(turkey_alphas=opt.get("tukey_alpha"))
-                except TypeError:
-                    dpdf.set_tukey_window()
+                dpdf.set_tukey_window(tukey_alphas=opt.get("tukey_alpha"))
             elif taper_kind == "Ellipsoidal":
-                alpha = opt.get("ell_alpha")
-                try:
-                    dpdf.set_ellipsoidal_tukey_window(turkey_alphas=alpha)
-                except TypeError:
-                    try:
-                        dpdf.set_ellipsoidal_tukey_window(turkey_alphas=(alpha[0], alpha[2], alpha[4]))
-                    except Exception:
-                        pass
+                dpdf.set_ellipsoidal_tukey_window(
+                    tukey_alpha=opt.get("ell_tukey_alpha"),
+                    coeffs=opt.get("ell_coeffs"),
+                )
             elif taper_kind == "Hexagonal":
-                try:
-                    dpdf.set_hexagonal_tukey_window(tukey_alphas=opt.get("hex_alpha"))
-                except TypeError:
-                    dpdf.set_hexagonal_tukey_window(tukey_alphas=opt.get("hex_alpha")[0])
+                dpdf.set_hexagonal_tukey_window(tukey_alphas=opt.get("hex_alpha"))
 
-            padding = opt.get("padding")
-            if padding and tuple(padding) != (0, 0, 0):
-                log_critical_point("DeltaPDF_Build_Padding", f"Padding data: {padding}")
-                dpdf.pad(padding=tuple(padding))
+            # Apply the window so that punch/interpolate/taper actually propagate
+            # into the tapered data (and thence to the padder); without this the
+            # FFT below would transform the raw, un-processed data.
+            if getattr(dpdf, "window", None) is not None:
+                dpdf.apply_window()
+                log_critical_point("DeltaPDF_Build_WindowApplied", "Taper window applied")
+
+            # Always pad (even with zero padding) so the tapered data reaches
+            # dpdf.padded, which is what perform_fft transforms. safe_pad
+            # tolerates a 0 on any axis.
+            padding = tuple(opt.get("padding") or (0, 0, 0))
+            log_critical_point("DeltaPDF_Build_Padding", f"Padding data: {padding}")
+            safe_pad(dpdf, padding)
 
             log_critical_point("DeltaPDF_Build_FFTStart", "Starting FFT computation")
             dpdf.perform_fft()
@@ -260,8 +294,14 @@ class DeltaPDFOptionsWidget(QDialog):
         if disable_ok:
             self.ok_button.setEnabled(not busy)
 
-    def _build_preview_nxdata(self) -> NXdata:
-        """Builds a reduced center-slice volume used only for quick previews."""
+    def _build_preview_nxdata(self, z_slices: Optional[int] = None) -> NXdata:
+        """Builds a reduced center-slice volume used only for quick previews.
+
+        ``z_slices`` overrides how many Z-planes to keep (default
+        ``self._preview_z_slices``). Pass a large value to keep the full Z
+        extent — needed for the taper preview, where a Tukey window over only
+        2 planes degenerates to all zeros.
+        """
         data = self.nxdata
         signal_name = data.attrs.get("signal", None) or getattr(data, "signal", None)
         if signal_name is None:
@@ -286,7 +326,7 @@ class DeltaPDFOptionsWidget(QDialog):
         x_step = max(1, int(np.ceil(sx / self._preview_max_xy_points)))
         y_step = max(1, int(np.ceil(sy / self._preview_max_xy_points)))
 
-        z_keep = max(2, int(self._preview_z_slices))
+        z_keep = max(2, int(z_slices if z_slices is not None else self._preview_z_slices))
         z_center = sz // 2
         z_start = max(0, z_center - (z_keep // 2))
         z_end = min(sz, z_start + z_keep)
@@ -356,7 +396,8 @@ class DeltaPDFOptionsWidget(QDialog):
                 float(self.tukeyAlphaK.value()),
                 float(self.tukeyAlphaL.value()),
             ),
-            "ell_alpha": (
+            "ell_tukey_alpha": float(self.ellTukeyAlpha.value()),
+            "ell_coeffs": (
                 float(self.ellAlphaH.value()),
                 float(self.ellAlphaHK.value()),
                 float(self.ellAlphaK.value()),
@@ -414,10 +455,10 @@ class DeltaPDFOptionsWidget(QDialog):
         self._cancelled = True
         self.reject()
 
-    def _get_preview_dpdf(self) -> Optional[DeltaPDF]:
+    def _get_preview_dpdf(self, z_slices: Optional[int] = None) -> Optional[DeltaPDF]:
         """Builds a lightweight DeltaPDF from a reduced center-slice preview volume."""
         try:
-            preview_data = self._build_preview_nxdata()
+            preview_data = self._build_preview_nxdata(z_slices=z_slices)
             dpdf = DeltaPDF()
             dpdf.set_data(preview_data)
             return dpdf
@@ -719,6 +760,7 @@ class DeltaPDFOptionsWidget(QDialog):
         self.maskPlotPreview = MultiPlottingGraphWidget()
         self.maskPlotPreview.setVisible(False)
         self.formLayout.addRow(self.maskPlotPreview)
+        
     def _show_empty_preview(self, widget: PlottedGraphWidget, title: str):
         if hasattr(widget, "axes"):
             for ax in widget.axes:
@@ -839,7 +881,7 @@ class DeltaPDFOptionsWidget(QDialog):
         self.formLayout.addRow(seeKernalPreviewButton)
         seeKernalPreviewButton.clicked.connect(lambda: self.generate_kernal_preview())
         
-        self.kernalPlotPreview = PlottedGraphWidget()
+        self.kernalPlotPreview = MultiPlottingGraphWidget()
         self.kernalPlotPreview.setVisible(False)
         self.formLayout.addRow(self.kernalPlotPreview)
 
@@ -852,21 +894,69 @@ class DeltaPDFOptionsWidget(QDialog):
         if dpdf is None:
             return
         self.kernalPlotPreview.setVisible(True)
-        if self.kernalComboBox.currentText() == "Gaussian":
-            # Generate a Gaussian kernel based on the sigma value
+
+        if self.kernalComboBox.currentText() != "Gaussian":
+            self._show_empty_preview(self.kernalPlotPreview, "Kernel Preview (select a kernel)")
+            return
+
+        # Lattice params drive the panel aspect ratio; ignore if unavailable.
+        try:
+            dpdf.set_lattice_params((
+                self.aSpinBox.value(), self.bSpinBox.value(), self.cSpinBox.value(),
+                self.alphaSpinBox.value(), self.betaSpinBox.value(), self.gammaSpinBox.value()
+            ))
+        except Exception:
+            pass
+
+        try:
+            # Punch using the currently-configured mask so the interpolation has
+            # missing regions to fill (mirrors the real build pipeline). If no
+            # mask is configured, interpolate the raw data.
+            mask = self.generateMask(dpdf)
+            if mask is not None:
+                dpdf.add_mask(mask)
+                dpdf.punch()
+
             size = (int(self.gaussianSizeX.value()), int(self.gaussianSizeY.value()), int(self.gaussianSizeZ.value()))
             dpdf.set_kernel(Gaussian3DKernel(stddev=self.gaussianStdev.value(), size=size))
             dpdf.interpolate()
-            try:
-                interp = dpdf.interpolated[dpdf.interpolated.signal].nxdata
-                self.kernalPlotPreview.updatePColorMeshPlot(
-                    interp[:, :, interp.shape[2] // 2].transpose(),
-                    title="Kernel Preview"
-                )
-            except Exception:
-                self._show_empty_preview(self.kernalPlotPreview, "Kernel Preview (unable to render)")
-        else:
-            self._show_empty_preview(self.kernalPlotPreview, "Kernel Preview (select a kernel)")
+
+            interp = dpdf.interpolated[dpdf.interpolated.signal].nxdata
+            interp_slice = interp[:, :, interp.shape[2] // 2]
+
+            source = dpdf.punched if getattr(dpdf, "punched", None) is not None else dpdf.data
+            punched = source[source.signal].nxdata
+            punched_slice = punched[:, :, punched.shape[2] // 2]
+
+            axL, axR = self.kernalPlotPreview.ax_left, self.kernalPlotPreview.ax_right
+            for a in self.kernalPlotPreview.axes:
+                a.clear()
+            self.kernalPlotPreview.quadmesh = None
+            self.kernalPlotPreview.colorbar = None
+
+            # Left: punched data (viridis) with the kernel cross-section overlaid
+            # (jet, alpha 0.75), zoomed into the corner where the kernel sits.
+            # Mirrors the reference:
+            #   ax.imshow(punched, cmap='viridis')
+            #   ax.imshow(kernel, alpha=0.75, cmap='jet')
+            #   ax.set(xlim=(0, N), ylim=(0, N))
+            axL.imshow(punched_slice, cmap="viridis")
+            kernel_arr = dpdf.kernel.array
+            kernel_slice = kernel_arr[:, :, kernel_arr.shape[2] // 2]
+            axL.imshow(kernel_slice, cmap="jet", alpha=0.75)
+            kr, kc = kernel_slice.shape
+            zoom = int(min(max(punched_slice.shape), max(kr, kc) * 4))
+            axL.set_xlim(0, zoom)
+            axL.set_ylim(0, zoom)
+            axL.set_title("Punched Data + Kernel")
+
+            # Right: interpolated result (full view).
+            axR.imshow(interp_slice, cmap="viridis")
+            axR.set_title("Interpolated")
+
+            self.kernalPlotPreview.canvas_main.draw_idle()
+        except Exception as e:
+            self._show_empty_preview(self.kernalPlotPreview, f"Kernel Preview (unable to render: {e})")
         
         
     def initTaper(self):
@@ -881,42 +971,49 @@ class DeltaPDFOptionsWidget(QDialog):
         self.ellipsoidalOptions = QWidget()
         ellLayout = QFormLayout(self.ellipsoidalOptions)
         ellLayout.setContentsMargins(20, 0, 0, 0)
-        # Ellipsoidal alphas as 6-tuple: (H, HK, K, KL, L, LH)
+        # Single Tukey taper strength (0 = no taper, 1 = full cosine taper)
+        self.ellTukeyAlpha = QDoubleSpinBox()
+        self.ellTukeyAlpha.setRange(0.0, 1.0)
+        self.ellTukeyAlpha.setValue(1.0)
+        self.ellTukeyAlpha.setSingleStep(0.05)
+        ellLayout.addRow(QLabel("Taper alpha:"), self.ellTukeyAlpha)
+        # Ellipsoid quadratic-form coeffs as 6-tuple: (c0, c1, c2, c3, c4, c5)
+        # for R^2 = c0*H^2 + c1*H*K + c2*K^2 + c3*K*L + c4*L^2 + c5*L*H
         self.ellAlphaH = QDoubleSpinBox()
         self.ellAlphaH.setRange(0.0, 1.0)
         self.ellAlphaH.setValue(0.5)
         self.ellAlphaH.setSingleStep(0.05)
-        ellLayout.addRow(QLabel("Alpha H:"), self.ellAlphaH)
+        ellLayout.addRow(QLabel("Coeff H² (c0):"), self.ellAlphaH)
 
         self.ellAlphaHK = QDoubleSpinBox()
         self.ellAlphaHK.setRange(0.0, 1.0)
-        self.ellAlphaHK.setValue(0.5)
+        self.ellAlphaHK.setValue(0.0)
         self.ellAlphaHK.setSingleStep(0.05)
-        ellLayout.addRow(QLabel("Alpha HK:"), self.ellAlphaHK)
+        ellLayout.addRow(QLabel("Coeff H·K (c1):"), self.ellAlphaHK)
 
         self.ellAlphaK = QDoubleSpinBox()
         self.ellAlphaK.setRange(0.0, 1.0)
         self.ellAlphaK.setValue(0.5)
         self.ellAlphaK.setSingleStep(0.05)
-        ellLayout.addRow(QLabel("Alpha K:"), self.ellAlphaK)
+        ellLayout.addRow(QLabel("Coeff K² (c2):"), self.ellAlphaK)
 
         self.ellAlphaKL = QDoubleSpinBox()
         self.ellAlphaKL.setRange(0.0, 1.0)
-        self.ellAlphaKL.setValue(0.5)
+        self.ellAlphaKL.setValue(0.0)
         self.ellAlphaKL.setSingleStep(0.05)
-        ellLayout.addRow(QLabel("Alpha KL:"), self.ellAlphaKL)
+        ellLayout.addRow(QLabel("Coeff K·L (c3):"), self.ellAlphaKL)
 
         self.ellAlphaL = QDoubleSpinBox()
         self.ellAlphaL.setRange(0.0, 1.0)
         self.ellAlphaL.setValue(0.5)
         self.ellAlphaL.setSingleStep(0.05)
-        ellLayout.addRow(QLabel("Alpha L:"), self.ellAlphaL)
+        ellLayout.addRow(QLabel("Coeff L² (c4):"), self.ellAlphaL)
 
         self.ellAlphaLH = QDoubleSpinBox()
         self.ellAlphaLH.setRange(0.0, 1.0)
-        self.ellAlphaLH.setValue(0.5)
+        self.ellAlphaLH.setValue(0.0)
         self.ellAlphaLH.setSingleStep(0.05)
-        ellLayout.addRow(QLabel("Alpha LH:"), self.ellAlphaLH)
+        ellLayout.addRow(QLabel("Coeff L·H (c5):"), self.ellAlphaLH)
 
         taperLayout.addWidget(self.ellipsoidalOptions)
 
@@ -986,18 +1083,17 @@ class DeltaPDFOptionsWidget(QDialog):
         self.hexagonalOptions.setVisible(text == "Hexagonal")
         
     def generate_taper_preview(self):
-        dpdf = self._get_preview_dpdf()
+        # Keep the full Z extent: a Tukey window over only 2 planes degenerates
+        # to all zeros (scipy.signal.windows.tukey(2) == [0, 0]).
+        dpdf = self._get_preview_dpdf(z_slices=10_000)
         if dpdf is None:
             return
         txt = self.taperComboBox.currentText()
         if txt == "Tukey":
             alpha = (self.tukeyAlphaH.value(), self.tukeyAlphaK.value(), self.tukeyAlphaL.value())
-            try:
-                dpdf.set_tukey_window(turkey_alphas=alpha)
-            except TypeError:
-                dpdf.set_tukey_window()
+            dpdf.set_tukey_window(tukey_alphas=alpha)
         elif txt == "Ellipsoidal":
-            alpha = (
+            coeffs = (
                 self.ellAlphaH.value(),
                 self.ellAlphaHK.value(),
                 self.ellAlphaK.value(),
@@ -1005,25 +1101,16 @@ class DeltaPDFOptionsWidget(QDialog):
                 self.ellAlphaL.value(),
                 self.ellAlphaLH.value(),
             )
-            try:
-                # prefer a single alpha tuple if supported
-                dpdf.set_ellipsoidal_tukey_window(turkey_alphas=alpha)
-            except TypeError:
-                # fallback to older 3-arg signature (H,K,L)
-                try:
-                    dpdf.set_ellipsoidal_tukey_window(turkey_alphas=(alpha[0], alpha[2], alpha[4]))
-                except Exception:
-                    pass
+            dpdf.set_ellipsoidal_tukey_window(tukey_alpha=self.ellTukeyAlpha.value(), coeffs=coeffs)
         elif txt == "Hexagonal":
-            try:
-                dpdf.set_hexagonal_tukey_window(tukey_alphas=(self.hexAlphaH.value(), self.hexAlphaK.value(), self.hexAlphaHK.value(), self.hexAlphaL.value()))
-            except TypeError:
-                dpdf.set_hexagonal_tukey_window(tukey_alphas=self.hexAlphaH.value())
+            dpdf.set_hexagonal_tukey_window(tukey_alphas=(self.hexAlphaH.value(), self.hexAlphaK.value(), self.hexAlphaHK.value(), self.hexAlphaL.value()))
         self.taperPlotPreview.setVisible(True)
         if getattr(dpdf, 'window', None) is not None:
             try:
                 window = dpdf.window
                 self.taperPlotPreview.updatePColorMeshPlot(window[:,:,window.shape[2]//2].transpose(), title="Taper Window")
+                # show taper preview:
+                # dpdf.window[:,:,data.shape[2]//2]
             except Exception:
                 self._show_empty_preview(self.taperPlotPreview, "Taper Preview (unable to render)")
         else:
@@ -1059,6 +1146,10 @@ class DeltaPDFOptionsWidget(QDialog):
         self.paddingPlotPreview.setVisible(False)
         self.formLayout.addRow(self.paddingPlotPreview)
         
+    def _pad_dpdf(self, dpdf, padding):
+        """Zero-pad the preview data, tolerating a 0 on any axis (see ``safe_pad``)."""
+        return safe_pad(dpdf, padding)
+
     def generate_padding_preview(self):
         dpdf = self._get_preview_dpdf()
         if dpdf is None:
@@ -1067,15 +1158,28 @@ class DeltaPDFOptionsWidget(QDialog):
         # store or use padding tuple as needed; preview placeholder
         if padding != (0, 0, 0):
             self.paddingTriple = padding
-            dpdf.pad(padding=padding)
+            self._pad_dpdf(dpdf, padding)
             self.paddingPlotPreview.setVisible(True)
+            self.paddingPlotAx = self.paddingPlotPreview.ax_main
             if getattr(dpdf, 'padded', None) is not None:
                 try:
-                    padded = dpdf.padded
-                    self.paddingPlotPreview.updatePColorMeshPlot(padded[:,:,padded.shape[2]//2].transpose(), title="Padded Data")
-                except Exception:
-                    self._show_empty_preview(self.paddingPlotPreview, "Padding Preview (unable to render)")
+                    padded = dpdf.padded[dpdf.padded.signal].nxdata
+                    padded_slice = padded[:, :, padded.shape[2] // 2].transpose()
+                    # Fixed vmin=0 with a robust upper percentile (like the
+                    # reference plot_slice(vmin=0, vmax=10) call) so the
+                    # zero-padded border reads against the data on a linear scale.
+                    finite = padded_slice[np.isfinite(padded_slice) & (padded_slice > 0)]
+                    vmax = float(np.percentile(finite, 99)) if finite.size else None
+                    self.paddingPlotPreview.updatePColorMeshPlot(
+                        padded_slice, title="Padded Data", vmin=0, vmax=vmax
+                    )
+                    self.paddingPlotPreview.ax_main.text(0.5, 1.05, f"Padding Preview (padding: {padding})", ha='center', va='bottom', fontsize=12, transform=self.paddingPlotPreview.ax_main.transAxes)
+                except Exception as e:
+                    self._show_empty_preview(self.paddingPlotPreview, f"Padding Preview (unable to render: {e})")
+                    self.paddingPlotPreview.ax_main.text(0.5, 0.5, f"Padding Preview (unable to render: {e})", ha='center', va='center', fontsize=12)
             else:
                 self._show_empty_preview(self.paddingPlotPreview, "Padding Preview (no padded data)")
+                self.paddingPlotPreview.ax_main.text(0.5, 0.5, "Padding Preview (no padded data)", ha='center', va='center', fontsize=12)
         else:
             self._show_empty_preview(self.paddingPlotPreview, "Padding Preview (no padded data)")
+            self.paddingPlotPreview.ax_main.text(0.5, 0.5, "Padding Preview (no padded data)", ha='center', va='center', fontsize=12)
