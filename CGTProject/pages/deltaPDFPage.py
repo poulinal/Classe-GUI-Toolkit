@@ -15,8 +15,28 @@ class DeltaPDFPage(MainAnalysisPage):
         self.dpdf = dpdf
         super().__init__(settings)
         self.HKLPlane = HKLPlaneEnum.H_K_Plane
+        # The redraw path reads the *model's* plane, not the page's, so push the
+        # default down to the model explicitly. Guarantees getQuadMeshAtCurrentIndex
+        # never short-circuits with "HKL Plane not set." for a freshly opened dpdf.
+        if self.dataModel is not None and self.dataModel.getHKLPlane() is None:
+            self.dataModel.setHKLPlane(self.HKLPlane)
+
+        # The inherited FileManagerWidget auto-initializes from the last directory
+        # (QTimer.singleShot in its constructor) and emits pathSelected, which would
+        # run loadTemperature and REPLACE our DiffuseDataModel with a plane-less
+        # TemperatureDaskDataModel -- breaking the slider ("HKL Plane not set.").
+        # This page's data comes from the passed-in dpdf, so detach the file-loading
+        # signals before the scheduled auto-init fires.
+        for signal, handler in (
+            (self.file_manager_widget.pathSelected, self.onDataPathSelected),
+            (self.file_manager_widget.submitOptions, self.onFileOptionsSubmit),
+        ):
+            try:
+                signal.disconnect(handler)
+            except (TypeError, RuntimeError):
+                pass
         # self.plotted_graph_widget = PlottedGraphWidget()
-        
+
         self.dataModel.setIndex(self.plotSliderWidget.value())
         self.plotSliderWidget.setMaximum(self.dataModel.getMaxDepth())
         self.plotSliderWidget.setEnabled(True)

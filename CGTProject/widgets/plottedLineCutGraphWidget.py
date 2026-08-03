@@ -11,6 +11,7 @@ class PlottedLineCutGraphWidget(PlottedGraphWidget):
         
         self.moveLine : int = None # 0 or 1 for the verticle line index (since we have two verticle lines in the verticleLineCutMode)
         
+        print(f"verticle line cut tool initialize in PlottedLineCutGraphWidget")
         self.initVerticleLineCutTool()
         
     def initVerticleLineCutTool(self):

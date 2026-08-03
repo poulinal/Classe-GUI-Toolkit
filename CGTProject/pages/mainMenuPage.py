@@ -103,6 +103,9 @@ class MainWindow(QMainWindow):
         self.analyze_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
         # self.deltapdf_page.back_btn.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
         
+        # immediately auto select analyze page
+        self.stacked_widget.setCurrentIndex(2)
+        
         
     def setup_shortcuts(self):
         """Setup keyboard shortcuts for tab management"""

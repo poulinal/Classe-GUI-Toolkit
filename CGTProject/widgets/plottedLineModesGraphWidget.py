@@ -14,6 +14,7 @@ class PlottedLineModesGraphWidget(PlottedGraphWidget):
         
         # self.initVerticleLineCutTool()
         # self.initHorizontalLineCutTool()
+        print(f"verticle horizontal line cut tool initialize in PlottedLineModesGraphWidget")
         self.initVerticleHorizontalLineCutTool()
         self.initDeltaPDFTool()
         
@@ -92,7 +93,8 @@ class PlottedLineModesGraphWidget(PlottedGraphWidget):
     def toggleVerticleHorizontalLineCutMode(self, enabled: bool):
         """Enable or disable vertical & horizontal line cut mode"""
         # if enabled and (self.verticle_line_cut_enabled or self.horizontal_line_cut_enabled):
-        if enabled and self.lineCutMode != LineCutModeEnum.BOTH:
+        print(f"Line cut mode: {self.lineCutMode}")
+        if enabled and (self.lineCutMode == LineCutModeEnum.VERTICAL or self.lineCutMode == LineCutModeEnum.HORIZONTAL):
             self.customToolbar.toggle_verticle_line_cut_mode(False)
             self.customToolbar.toggle_horizontal_line_cut_mode(False)
         if enabled:
