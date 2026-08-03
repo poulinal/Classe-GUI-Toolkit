@@ -8,6 +8,8 @@ from PyQt5.QtCore import Qt, QSettings, pyqtSignal, QTimer
 from abc import abstractmethod
 import numpy as np
 
+import matplotlib.cm as mpl_cm
+
 from CGTProject.widgets.fileManagerWidget import FileManagerWidget
 from CGTProject.models.temperatureDataModel import TemperatureDataModel
 from CGTProject.models.dataModel import DataModel
@@ -39,7 +41,11 @@ class IAnalysisPage(QWidget):
 
         # When dragging the slider, avoid expensive autoscale on every frame.
         self._autoscale_next_redraw: bool = True
-        
+
+        # Delta-PDF (signed) data wants color limits pinned symmetrically about
+        # zero so the diverging colormap's white sits at 0. Subclasses opt in.
+        self._useSymmetricContrast: bool = False
+
         self.layout : QGridLayout = QGridLayout()
         
         self.initUI()
@@ -151,7 +157,9 @@ class IAnalysisPage(QWidget):
 
     def onContrastRampValueChanged(self, black_position: float, white_position: float):
         if self.plotted_graph_widget:
-            limits = self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+            limits = self.plotted_graph_widget.setNormalizedContrast(
+                black_position, white_position, symmetric=self._useSymmetricContrast
+            )
             if limits is not None:
                 self.colorRampWidget.setContrastLimits(*limits)
 
@@ -159,7 +167,9 @@ class IAnalysisPage(QWidget):
         if not self.plotted_graph_widget or not hasattr(self, "colorRampWidget"):
             return
         black_position, white_position = self.colorRampWidget.get_slider_position()
-        limits = self.plotted_graph_widget.setNormalizedContrast(black_position, white_position)
+        limits = self.plotted_graph_widget.setNormalizedContrast(
+            black_position, white_position, symmetric=self._useSymmetricContrast
+        )
         if limits is not None:
             self.colorRampWidget.setContrastLimits(*limits)
       
@@ -192,10 +202,18 @@ class IAnalysisPage(QWidget):
             self._clearAdditionalOptionsLayout()
         elif selected_option == str(AdditionalOptionsEnum.CHANGE_COLORMAP):
             changeColormap = QComboBox()
-            changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
-            changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
-            self._clearAdditionalOptionsLayout()
+            #get all possible colormap options
+            all_colormaps = sorted(mpl_cm._colormaps.keys())
+            changeColormap.addItems(all_colormaps)
+            # Preselect the page's default (subclasses may override, e.g. delta-PDF).
+            # Set the text BEFORE connecting so this doesn't fire changeColormap.
+            changeColormap.setCurrentText(self._getColormapComboDefault())
+            changeColormap.currentTextChanged.connect(self.changeColormap)
+            self._colormapCombo = changeColormap
+            self._clearAdditionalOptionsWidgets()
             self.additionalOptionsLayout.addWidget(changeColormap)
+            # Hook for subclasses to add extra colormap controls (e.g. reset-to-default).
+            self._buildExtraColormapControls()
         elif selected_option == str(AdditionalOptionsEnum.SKEW_DATA):
             skewAngleLabel = QLabel("Skew Angle:")
             skewAngleSlider = QSlider(Qt.Horizontal)
@@ -211,6 +229,12 @@ class IAnalysisPage(QWidget):
         elif selected_option == str(AdditionalOptionsEnum.DOWNLOAD_DATA):
             QTimer.singleShot(0, self.downloadCurrentDataAsNxs)
             QTimer.singleShot(0, lambda: self.additionalOptionsCombo.setCurrentIndex(0))
+        else:
+            self.checkPageSpecificAdditionalOptions(selected_option)
+            
+    def checkPageSpecificAdditionalOptions(self, selected_option):
+        """Override this method in subclasses to handle additional options specific to that page."""
+        pass
 
     def _clearAdditionalOptionsLayout(self):
         for i in reversed(range(self.additionalOptionsLayout.count())):
@@ -486,7 +510,16 @@ class IAnalysisPage(QWidget):
         print("Changing colormap...")
         # Placeholder for colormap change logic
         if self.plotted_graph_widget:
-            self.plotted_graph_widget.changeColorMap("new_cmap")
+            self.plotted_graph_widget.changeColorMap(newCmap)
             self.redrawPlot()
+
+    def _getColormapComboDefault(self) -> str:
+        """Colormap to preselect in the 'Change colormap' combo. Overridable."""
+        return "viridis"
+
+    def _buildExtraColormapControls(self):
+        """Hook for subclasses to append extra colormap controls to the
+        additional-options layout (e.g. a reset-to-default button). No-op here."""
+        pass
 
 

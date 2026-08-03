@@ -1,6 +1,8 @@
 # AP 2026
 from PyQt5.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QSlider, QComboBox, QCheckBox, QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QScrollArea, QProgressBar, QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal
+
+import matplotlib.cm as mpl_cm
 import os
 
 import numpy as np
@@ -369,31 +371,15 @@ class MainAnalysisPage(IAnalysisPage):
                 self._notify_error("No data extracted from line cut options")
                 ValueError("No data extracted from line cut options")
             
-    def onAdditionalOptionChanged(self, index):
-        selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
-        print(f"Additional option selected: {selected_option}")
-        if selected_option == AdditionalOptionsEnum.BLANK_STATE.value:
-            self._clearAdditionalOptionsWidgets()
-        elif selected_option == AdditionalOptionsEnum.CHANGE_COLORMAP.value:
-            changeColormap = QComboBox()
-            changeColormap.addItems(["viridis", "plasma", "inferno", "magma", "cividis"])
-            changeColormap.currentIndexChanged.connect(lambda newCmap: self.changeColormap(changeColormap.currentText()))
-            self._clearAdditionalOptionsWidgets()
-            self.additionalOptionsLayout.addWidget(changeColormap)
-        elif selected_option == AdditionalOptionsEnum.SKEW_DATA.value:
-            skewAngleLabel = QLabel("Skew Angle:")
-            skewAngleSlider = QSlider(Qt.Horizontal)
-            skewAngleSlider.setMinimum(-45)
-            skewAngleSlider.setMaximum(45)
-            skewAngleSlider.setValue(0)
-            skewAngleSlider.setTickPosition(QSlider.TicksBelow)
-            skewAngleSlider.setTickInterval(1)
-            #on release of slider 
-            skewAngleSlider.sliderReleased.connect(lambda: self.applySkewAngle(skewAngleSlider.value()))
-            self._clearAdditionalOptionsWidgets()
-            self.additionalOptionsLayout.addWidget(skewAngleLabel)
-            self.additionalOptionsLayout.addWidget(skewAngleSlider)
-        elif selected_option == AdditionalOptionsEnum.TRIM_DATA.value:
+    # def onAdditionalOptionChanged(self, index):
+    #     selected_option = self.additionalOptionsCombo.itemText(index) if index >= 0 else self.additionalOptionsCombo.currentText()
+    #     print(f"Additional option selected: {selected_option}")
+    #     if selected_option == AdditionalOptionsEnum.BLANK_STATE.value:
+    #         self._clearAdditionalOptionsWidgets()
+            
+    def checkPageSpecificAdditionalOptions(self, selected_option):
+        """Override this method in subclasses to handle additional options specific to that page."""
+        if selected_option == AdditionalOptionsEnum.TRIM_DATA.value:
             self._clearAdditionalOptionsWidgets()
             self.trimDataWidget = TrimDataWidget(dataModel = self.dataModel, file_manager_widget = self.file_manager_widget, plot_slider_widget = self.plotSliderWidget, parent=self)
             self.trimDataWidget.notifyInfo.connect(self._notify_info)
@@ -415,8 +401,8 @@ class MainAnalysisPage(IAnalysisPage):
             self.binDataWidget.progressFinished.connect(self._finishLoadProgress)
             self.binDataWidget.redrawRequested.connect(self.redrawPlot)
             self.additionalOptionsLayout.addWidget(self.binDataWidget._buildBinAdditionalOptions())
-        else:
-            super().onAdditionalOptionChanged(index)
+        # else:
+        #     super().onAdditionalOptionChanged(index)
             
             
     def onOpenDeltaPDFOptionsDialogue(self):

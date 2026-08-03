@@ -360,8 +360,14 @@ class PlottedGraphWidget(QWidget):
             self.quadmesh.set_cmap(new_cmap)
             self.canvas_main.draw_idle()
 
-    def setNormalizedContrast(self, black_position: float, white_position: float):
-        """Map normalized slider positions [0, 1] to data-space color limits."""
+    def setNormalizedContrast(self, black_position: float, white_position: float, symmetric: bool = False):
+        """Map normalized slider positions [0, 1] to data-space color limits.
+
+        When ``symmetric`` is True (delta-PDF / signed data), the limits are pinned
+        symmetrically about zero -- ``[-B*white, +B*white]`` with
+        ``B = max(|data_min|, |data_max|)`` -- so a diverging colormap keeps white
+        at 0. The white handle then scales saturation; the black handle is unused.
+        """
         if self.quadmesh is None:
             return None
 
@@ -377,6 +383,20 @@ class PlottedGraphWidget(QWidget):
 
         data_min = float(np.min(finite_values))
         data_max = float(np.max(finite_values))
+
+        if symmetric:
+            bound = max(abs(data_min), abs(data_max))
+            if bound <= 0:
+                return None
+            white = max(1e-6, min(float(white_position), 1.0))
+            vmax = white * bound
+            vmin = -vmax
+            self.quadmesh.set_clim(vmin=vmin, vmax=vmax)
+            if self.colorbar is not None:
+                self.colorbar.update_normal(self.quadmesh)
+            self.canvas_main.draw_idle()
+            return vmin, vmax
+
         if data_max <= data_min:
             return None
 

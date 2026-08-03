@@ -3,7 +3,7 @@
 
 import os
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from CGTProject.pages.mainAnalysisPage import MainAnalysisPage
 from CGTProject.models.diffuseScatteringModel import DiffuseDataModel
 from CGTProject.widgets.plottedGraphWidget import PlottedGraphWidget
@@ -20,6 +20,14 @@ class DeltaPDFPage(MainAnalysisPage):
         # never short-circuits with "HKL Plane not set." for a freshly opened dpdf.
         if self.dataModel is not None and self.dataModel.getHKLPlane() is None:
             self.dataModel.setHKLPlane(self.HKLPlane)
+
+        # Delta-PDF is signed data: follow the conventional diverging display --
+        # blue-white-red with white pinned at zero. The colormap is re-applied on
+        # every redraw (updateQuadMeshPlot recreates the mesh -> resets to viridis),
+        # and contrast limits are held symmetric about zero.
+        self._plotCmap = "bwr"  # blue -> white -> red; the delta-PDF default
+        self._currentCmap = self._plotCmap  # active colormap; user may change it, reset restores _plotCmap
+        self._useSymmetricContrast = True
 
         # The inherited FileManagerWidget auto-initializes from the last directory
         # (QTimer.singleShot in its constructor) and emits pathSelected, which would
@@ -47,10 +55,48 @@ class DeltaPDFPage(MainAnalysisPage):
         else:
             print("DeltaPDF data is None.")
         
+        #auto collapse file manager widget
+        self.file_manager_widget._setCollapsed(True)
         self.redrawPlot()
         
     def setupDataModel(self):
         self.dataModel : DiffuseDataModel = DiffuseDataModel(self.dpdf) # Placeholder for DiffuseDataModel instance
+
+    def redrawPlot(self):
+        # Base redraw builds the mesh and applies the (symmetric) contrast ramp;
+        # then re-apply the active colormap, since the mesh may have been recreated
+        # (which resets the colormap back to matplotlib's default). Defaults to the
+        # delta-PDF bwr map but respects a user's selection until they reset.
+        super().redrawPlot()
+        self._applyDeltaPdfColormap()
+
+    def _applyDeltaPdfColormap(self):
+        widget = getattr(self, "plotted_graph_widget", None)
+        if widget is not None and getattr(widget, "quadmesh", None) is not None:
+            widget.changeColorMap(self._currentCmap)
+
+    def changeColormap(self, newCmap):
+        # Remember the user's choice so redrawPlot keeps applying it (instead of
+        # snapping back to bwr) until they reset to the delta-PDF default.
+        self._currentCmap = newCmap
+        super().changeColormap(newCmap)
+
+    def _getColormapComboDefault(self) -> str:
+        # Open the colormap combo on whatever is currently active (bwr by default).
+        return self._currentCmap
+
+    def _buildExtraColormapControls(self):
+        resetButton = QPushButton(f"Reset to Delta-PDF default ({self._plotCmap})")
+        resetButton.clicked.connect(self.resetColormapToDefault)
+        self.additionalOptionsLayout.addWidget(resetButton)
+
+    def resetColormapToDefault(self):
+        self.changeColormap(self._plotCmap)
+        combo = getattr(self, "_colormapCombo", None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentText(self._plotCmap)
+            combo.blockSignals(False)
 
     def _getActivePlotData(self):
         current_data = super()._getActivePlotData()
