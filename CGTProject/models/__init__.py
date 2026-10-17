@@ -1,5 +1,5 @@
-from .classeDataModel import ClasseDataModel
+from .temperatureDataModel import TemperatureDataModel
 
 __all__ = [
-    "ClasseDataModel",
+    "TemperatureDataModel",
     ]

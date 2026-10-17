@@ -1,0 +1,122 @@
+### 2024 Alex Poulin
+import sys
+from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
+from PyQt5.QtGui import QPainter, QColor, QLinearGradient, QMouseEvent
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QHBoxLayout
+
+class ColorRampWidget(QWidget):
+    
+    valueChanged = pyqtSignal(float, float) #send blackvalue, whitevalue
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._outer_layout = QVBoxLayout(self)
+        self.setMinimumHeight(72)
+        self.black_position = 0.0
+        self.white_position = 1.0
+        self.display_vmin = None
+        self.display_vmax = None
+        self.slider_radius = 6
+        self.selected_slider = None
+
+        self.rangeLabel = QLabel(self)
+        self.rangeLabel.setAlignment(Qt.AlignCenter)
+        self._outer_layout.addWidget(self.rangeLabel)
+        self._update_range_label()
+
+    def setContrastLimits(self, vmin: float, vmax: float):
+        self.display_vmin = float(vmin)
+        self.display_vmax = float(vmax)
+        self._update_range_label()
+
+    def _update_range_label(self):
+        if self.display_vmin is None or self.display_vmax is None:
+            self.rangeLabel.setText(
+                f"Black: {self.black_position:.2f}   White: {self.white_position:.2f}"
+            )
+        else:
+            self.rangeLabel.setText(
+                f"vmin: {self.display_vmin:.6g}   vmax: {self.display_vmax:.6g}"
+            )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        gradient = QLinearGradient(0, 0, self.width(), 0)
+        
+        gradient.setColorAt(self.black_position, QColor(0, 0, 0))
+        gradient.setColorAt(self.white_position, QColor(255, 255, 255))
+
+        painter.fillRect(self.rect(), gradient)
+
+        # Draw sliders
+        self.draw_slider(painter, self.black_position, QColor(0, 0, 0), QColor(255, 255, 255))
+        self.draw_slider(painter, self.white_position, QColor(255, 255, 255), QColor(0, 0, 0))
+
+    def draw_slider(self, painter, position, color, invtColor):
+        x = position * self.width()
+        y = self.height() / 2
+        painter.setBrush(color)
+        #painter.setPen(Qt.GlobalColor.black)
+        painter.setPen(invtColor)
+        painter.drawEllipse(QPointF(x, y), self.slider_radius, self.slider_radius)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            width = max(1, self.width())
+            pos = event.pos().x() / width
+            if abs(pos - self.black_position) < abs(pos - self.white_position):
+                self.selected_slider = 'black'
+            else:
+                self.selected_slider = 'white'
+            self.update_slider_position(event.pos().x())
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self.selected_slider:
+            self.update_slider_position(event.pos().x())
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        self.selected_slider = None
+
+    def update_slider_position(self, x):
+        width = max(1, self.width())
+        position = x / width
+        position = max(0.0, min(position, 1.0))
+        
+        if self.selected_slider == 'black':
+            self.black_position = min(position, self.white_position - 0.01)
+        elif self.selected_slider == 'white':
+            self.white_position = max(position, self.black_position + 0.01)
+
+        self._update_range_label()
+            
+        self.valueChanged.emit(self.black_position, self.white_position)
+        
+        self.update()
+        
+    def get_slider_position(self):
+        """get the slider position
+
+        Returns:
+            tuple: black position, white position
+        """
+        return self.black_position, self.white_position
+
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('Black and White Color Ramp Widget')
+        
+        self.color_ramp = ColorRampWidget()
+        self.label = QLabel('Drag the sliders to change the color ramp range')
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.color_ramp)
+        layout.addWidget(self.label)
+
+        self.setLayout(layout)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
